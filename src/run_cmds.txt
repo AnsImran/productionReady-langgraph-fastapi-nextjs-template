@@ -1,0 +1,7 @@
+#poetry run python run_service.py
+uv run python run_service.py
+
+#poetry run streamlit run streamlit_app.py
+uv run streamlit run streamlit_app.py
+
+
