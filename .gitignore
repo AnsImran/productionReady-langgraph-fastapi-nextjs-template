@@ -1,7 +1,3 @@
-# node.js env files
-node_modules
-
-
 # d/f version sof .env file
 .env.works_with_already_running_postgres
 .env.works_with_spinning_new_postgres
@@ -210,12 +206,12 @@ privatecredentials/*
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
 # dependencies
-node_modules
-.pnp
-.pnp.js
+node_modules/
+.pnp/
+.pnp.js/
 
 # testing
-coverage
+coverage/
 
 # next.js
 .next/
@@ -223,7 +219,7 @@ out/
 build
 
 # misc
-.DS_Store
+.DS_Store/
 *.pem
 
 # debug
@@ -233,17 +229,17 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # local env files
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
+*.env.local
+*.env.development.local
+*.env.test.local
+*.env.production.local
 
 # turbo
-.turbo
+*.turbo
 
-.env
-.vercel
-.env*.local
+*.env
+*.vercel
+*.env*.local
 
 # Playwright
 /test-results/
@@ -251,4 +247,4 @@ yarn-error.log*
 /blob-report/
 /playwright/*
 
-.github
+*.github

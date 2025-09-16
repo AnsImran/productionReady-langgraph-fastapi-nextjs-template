@@ -1,9 +1,9 @@
-ye sara kuch nikalna specially change krna ya adapt krna itna 
-straightforward nahihoga, tasalli say one-by-one
+ye sara kuch nikalna, specially change krna ya adapt krna, itna 
+straightforward nahi hoga, tasalli say one-by-one
 
 fileuploads ko filhal inactive kr do, comment out or whatever... via vercel blob krtay thay ye ...
 
-persistence via postgress drizzle ko bhi filhal inactive kr do, comment out or whatever... (oersistence backend par hay)
+persistence via postgress drizzle ko bhi filhal inactive kr do, comment out or whatever... (persistence backend par hay)
 
 artifacts/workspaces ko bhi filhal inactive kr do, comment out or whatever.. (ye functionality hay vesay kfi amazing but ignore it for the time being)
 (https://chatgpt.com/c/68c2adb3-eafc-8323-b6f4-820cd4084602)
