@@ -11,6 +11,7 @@ from langchain_core.messages import (
 from schema import ChatMessage
 
 
+
 def convert_message_content_to_string(content: str | list[str | dict]) -> str:
     if isinstance(content, str):
         return content

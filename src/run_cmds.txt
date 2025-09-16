@@ -1,7 +1,58 @@
-#poetry run python run_service.py
 uv run python run_service.py
-
-#poetry run streamlit run streamlit_app.py
 uv run streamlit run streamlit_app.py
+
+
+
+
+INPUT:
+curl -i -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoidXNlciIsImlhdCI6MTc1NzE2NTM0MSwiaXNzIjoiaHR0cHM6Ly9leGFtcGxlLmNvbSIsImF1ZCI6Im15LWF1ZGllbmNlIiwic3ViIjoiMTIzNDU2Nzg5MCIsImV4cCI6MTc1NzQyNDU0MX0.WnwIsuMeF2Sf4t3ZbP_yzR6ZeeiSrwV6XwlgnQOGZgM" http://127.0.0.1:8080/info
+
+
+OUTPUT:
+C:\Users\Ans>curl -i -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTcxNzU0NjIsInN1YiI6ImhlbGxvIGJpdGNoZXMhIn0.s4b6hqYPwAH89lFc4Ns2YXhrNPy4xJ4M2HjAsGJ58f4" http://127.0.0.1:8080/info
+HTTP/1.1 200 OK
+date: Fri, 05 Sep 2025 16:24:43 GMT
+server: uvicorn
+content-length: 961
+content-type: application/json
+
+{"agents":[{"key":"chatbot","description":"A simple chatbot."},{"key":"research-assistant","description":"A research assistant with web search and calculator."},{"key":"rag-assistant","description":"A RAG assistant with access to information in a database."},{"key":"command-agent","description":"A command agent."},{"key":"bg-task-agent","description":"A background task agent."},{"key":"langgraph-supervisor-agent","description":"A langgraph supervisor agent"},{"key":"interrupt-agent","description":"An agent the uses interrupts."},{"key":"knowledge-base-agent","description":"A RAG agent using Amazon Bedrock Knowledge Base"},{"key":"basic_langgraph_agent","description":"A very basic langgraph based chatbot."},{"key":"prototype_rag_tool","description":"prototype rag agent with tool nodes"}],"models":["gpt-4.1-nano-2025-04-14","gpt-4o","gpt-4o-mini","gpt-5-nano-2025-08-07"],"default_agent":"research-assistant","default_model":"gpt-4.1-nano-2025-04-14"}
+
+
+exp: 8 sep 9 am
+abc123 key
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3NTcxNzU0NjIsInN1YiI6ImhlbGxvIGJpdGNoZXMhIn0.s4b6hqYPwAH89lFc4Ns2YXhrNPy4xJ4M2HjAsGJ58f4
+
+exp: 8 sep 1 pm
+base64 key
+eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoidXNlciIsImlhdCI6MTc1NzE2NTM0MSwiaXNzIjoiaHR0cHM6Ly9leGFtcGxlLmNvbSIsImF1ZCI6Im15LWF1ZGllbmNlIiwic3ViIjoiMTIzNDU2Nzg5MCIsImV4cCI6MTc1NzQyNDU0MX0.WnwIsuMeF2Sf4t3ZbP_yzR6ZeeiSrwV6XwlgnQOGZgM
+-----------
+
+from windows:
+curl -X POST "http://localhost:8080/self_corrective_rag/stream" ^
+  -H "accept: text/event-stream" ^
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoicHJveHkiLCJpYXQiOjE3NTczMjc0MzgsImlzcyI6Imh0dHA6Ly9sb2NhbGhvc3Q6MzAwMCIsImF1ZCI6ImZhc3RhcGlfYWdlbnRfbWljcm9zZXJ2aWNlIiwic3ViIjoiZWRnZS1wcm94eSIsImV4cCI6MTc1NzMyOTIzOH0.AerR9jpAdu9noFceQzaQd-FuEWEKHOB9qm5ceZs1ErE" ^
+  -H "Content-Type: application/json" ^
+  -d "{ \"message\": \"paye?\", \"model\": \"gpt-4o-mini\", \"thread_id\": \"847c6285-8fc9-4560-a83f-4e6285809254\", \"user_id\": \"847c6285-8fc9-4560-a83f-4e6285809254\", \"agent_config\": { \"spicy_level\": 0.8 }, \"stream_tokens\": true }"
+
+
+
+
+directly hitting fatsapi backend from dev container
+curl -N -i "http://host.docker.internal:8080/basic_langgraph_agent/stream" \
+  -H "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJyb2xlIjoidXNlciIsImlhdCI6MTc1NzE2NTM0MSwiaXNzIjoiaHR0cHM6Ly9leGFtcGxlLmNvbSIsImF1ZCI6Im15LWF1ZGllbmNlIiwic3ViIjoiMTIzNDU2Nzg5MCIsImV4cCI6MTc1NzQyNDU0MX0.WnwIsuMeF2Sf4t3ZbP_yzR6ZeeiSrwV6XwlgnQOGZgM" \
+  -H "Accept: text/event-stream" \
+  -H "Content-Type: application/json" \
+  --data '{"message":"paye?","stream_tokens":true}'
+
+
+still indie dev container but via proxy:
+hitting via proxy, (Next.js API route at /api/chat (the Edge server-side code))...
+(no token in curl; proxy injects it)
+curl -N -i http://host.docker.internal:3000/api/chat \
+  -H "Content-Type: application/json" \
+  --data '{"messages":[{"id":"m1","role":"user","parts":[{"type":"text","text":"hello?"}]}]}'
+
+
 
 

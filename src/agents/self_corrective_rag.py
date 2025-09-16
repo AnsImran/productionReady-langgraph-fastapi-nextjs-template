@@ -10,11 +10,13 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, MessagesState, END
 from langgraph.prebuilt import ToolNode
 from langgraph.types import Command
+from langgraph.types import StreamWriter
 
 # --- Your project imports ---
 from vector_databases import get_docs_pinecone, get_docs_timescale
 from core import settings  # expects: settings.VEC_CLIENT, settings.PINECONE_VEC_CLIENT, settings.POSTGRES_TIMESCALE_VEC_CLIENT, settings.DEFAULT_EMBEDDING_MODEL
-
+import openai
+openai.api_type=openai
 
 
 
@@ -462,6 +464,7 @@ async def tool_get_docs_timescale(
         name         = "get_docs_timescale",
     )
 
+
     return Command(update={
         "messages":  [tool_msg],
         "documents": normalized,
@@ -537,6 +540,7 @@ async def grade_generation_v_documents_and_question(state: AgentState, config: R
 
     if VERBOSE:
         print("---DECISION: GENERATION IS GROUNDED IN DOCUMENTS---")
+        # print(state["documents"])
         print("---GRADE GENERATION vs QUESTION---")
 
     answer_grader = (ANSWER_GRADER_PROMPT | llm.with_structured_output(GradeAnswer)).with_config(tags=["skip_stream"])
@@ -566,15 +570,22 @@ async def transform_query(state: AgentState, config: RunnableConfig) -> AgentSta
 
 ################################################################################################################
 ## Fallback Handler
-async def cant_help(state: AgentState, config: RunnableConfig) -> AgentState:
-    return {"candidate_answer": "Sorry, I cannot help you in this matter."}
+# async def cant_help(state: AgentState, config: RunnableConfig) -> AgentState:
+#     return {"candidate_answer": "Sorry, I cannot help you in this matter."}
+
+
+async def cant_help(state: AgentState, config: RunnableConfig, writer: StreamWriter) -> AgentState:  # writer auto-injected
+    PRESET = "Sorry, I cannot help you in this matter."
+    for word in PRESET.split():
+        writer(word + ' ')
+    return {"candidate_answer": PRESET}
 
 
 ################################################################################################################
 ## Finalize Response
 async def finalize_response(state: AgentState, config: RunnableConfig) -> AgentState:
     if VERBOSE:
-        print("---FINALIZING THE RESPONSE---")        
+        print("---FINALIZING THE RESPONSE---")
         return {"messages": [AIMessage(content=state["candidate_answer"])]}
 
 

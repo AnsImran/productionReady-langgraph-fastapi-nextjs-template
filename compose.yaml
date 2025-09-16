@@ -2,7 +2,7 @@ services:
   postgres:
     image: postgres:16
     ports:
-      - "5432:5432"
+      - "5420:5432"
     environment:
       - POSTGRES_USER=${POSTGRES_USER:-postgres}
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
@@ -80,75 +80,3 @@ services:
 
 volumes:
   postgres_data:
-
-
-
-# services:
-#   agent_service:
-#     build:
-#       context: .
-#       dockerfile: docker/Dockerfile.service
-#     ports:
-#       - "8080:8080"
-#     env_file:
-#       - .env
-#     # Optional hard overrides if you want to guarantee the host DB is used
-#     environment:
-#       HOST: 0.0.0.0
-#       POSTGRES_HOST: host.docker.internal
-#       POSTGRES_PORT: "5430"
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:8080/info"]
-#       interval: 5s
-#       timeout: 5s
-#       retries: 5
-#     volumes:
-#       - ./privatecredentials:/privatecredentials
-#     develop:
-#       watch:
-#         - path: src/agents/
-#           action: sync+restart
-#           target: /app/agents/
-#         - path: src/schema/
-#           action: sync+restart
-#           target: /app/schema/
-#         - path: src/service/
-#           action: sync+restart
-#           target: /app/service/
-#         - path: src/core/
-#           action: sync+restart
-#           target: /app/core/
-#         - path: src/memory/
-#           action: sync+restart
-#           target: /app/memory/
-#         - path: src/vector_databases/
-#           action: sync+restart
-#           target: /app/vector_databases/
-
-
-#   streamlit_app:
-#     build:
-#       context: .
-#       dockerfile: docker/Dockerfile.app
-#     ports:
-#       - "8501:8501"
-#     depends_on:
-#       - agent_service
-#     healthcheck:
-#       test: ["CMD", "curl", "-f", "http://localhost:8501/healthz"]
-#       interval: 5s
-#       timeout: 5s
-#       retries: 5
-#     environment:
-#       - AGENT_URL=http://agent_service:8080
-#     develop:
-#       watch:
-#         - path: src/client/
-#           action: sync+restart
-#           target: /app/client/
-#         - path: src/schema/
-#           action: sync+restart
-#           target: /app/schema/
-#         - path: src/streamlit_app.py
-#           action: sync+restart
-#           target: /app/streamlit_app.py

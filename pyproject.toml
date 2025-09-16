@@ -13,7 +13,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
 ]
 
-requires-python = ">=3.13,<3.14"#">=3.13,<4.0" #">=3.11"
+requires-python = ">=3.13,<3.14"#">=3.13,<4.0" #">=3.11" 
 
 
 dependencies = [
@@ -61,8 +61,11 @@ dependencies = [
     "timescale-vector (>=0.0.7,<0.0.8)",
     "pinecone[asyncio,grpc] (>=7.3.0,<8.0.0)",
     "langchain-pinecone (>=0.2.11,<0.3.0)",
-    "langgraph-api==0.2.44",
-    "langgraph-cli[inmem]==0.3.3",
+    "langgraph-cli[inmem] (>=0.3.6,<0.4.0)",
+    "sqlmodel>=0.0.24",
+    "passlib[bcrypt]>=1.7.4,<2.0.0",
+    "bcrypt==4.3.0",
+    "pyjwt>=2.8.0,<3.0.0",
 ]
 
 [dependency-groups]

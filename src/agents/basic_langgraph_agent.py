@@ -56,7 +56,7 @@ async def acall_model(state: AgentState, config: RunnableConfig) -> AgentState:
 # -------------------------
 
 
-from IPython.display import Image, display
+# from IPython.display import Image, display
 from langgraph.graph import StateGraph, START, END
 from langchain_core.messages import HumanMessage, SystemMessage
 

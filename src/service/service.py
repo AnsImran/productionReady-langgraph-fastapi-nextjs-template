@@ -6,7 +6,10 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID, uuid4
+import uuid
+import os
 
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.responses import StreamingResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -18,6 +21,9 @@ from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
 from langgraph.types import Command, Interrupt
 from langsmith import Client as LangsmithClient
 from timescale_vector import client
+
+
+
 
 
 
@@ -66,6 +72,32 @@ from vector_databases import get_vec_client_timescale
 
 
 
+
+import jwt
+from jwt.exceptions import InvalidTokenError
+from pydantic import ValidationError
+import base64
+
+from sqlmodel import SQLModel
+
+class TokenPayload(SQLModel):
+    sub: str | None = None
+
+
+# Access API keys and credentials
+AUTH_SECRET : str
+ALGORITHM   : str
+
+
+# will later get them from core.settings and will put in core.settings from .env
+AUTH_SECRET = settings.AUTH_SECRET
+AUTH_SECRET_BYTES = base64.b64decode(AUTH_SECRET.get_secret_value().strip())
+ALGORITHM   = 'HS256'
+
+
+
+
+
 # This line suppresses **LangChain beta warnings** at runtime:
 # * `warnings.filterwarnings("ignore", category=LangChainBetaWarning)` tells Python to **ignore all `LangChainBetaWarning`** messages.
 # * These warnings appear when using **experimental or beta features** in LangChain.
@@ -82,6 +114,13 @@ warnings.filterwarnings("ignore", category=LangChainBetaWarning)
 # * Logging behavior (format, level, output) depends on the **global logging configuration**.
 # * Example log: `ERROR:service.api:Something went wrong`.
 logger = logging.getLogger(__name__)
+
+
+
+
+
+
+
 
 
 
@@ -104,11 +143,39 @@ def verify_bearer(
         Depends(HTTPBearer(description="Please provide AUTH_SECRET api key.", auto_error=False)),
     ],
 ) -> None:
-    if not settings.AUTH_SECRET:
+    """Simple bearer‑token check.
+
+    If AUTH_SECRET is unset → authentication is disabled.
+    Otherwise the request must send `Authorization: Bearer <AUTH_SECRET>`.
+    """
+    if not AUTH_SECRET_BYTES:  # auth disabled
         return
-    auth_secret = settings.AUTH_SECRET.get_secret_value()
-    if not http_auth or http_auth.credentials != auth_secret:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+    
+
+    if not http_auth or http_auth.scheme.lower() != "bearer":
+        raise HTTPException(status_code=403, detail="Not authenticated")
+    
+
+    token = http_auth.credentials
+    # Validate a token created by the external issuer (shared secret HS256 in this demo).
+    try:
+        print(token)
+        payload    = jwt.decode(token, AUTH_SECRET_BYTES, algorithms=[ALGORITHM], issuer="http://localhost:3000", audience="fastapi_agent_microservice") # settings.AUTH_SECRET.get_secret_value()
+        token_data = TokenPayload(**payload)
+        print(token_data.model_dump())
+    except (InvalidTokenError, ValidationError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Could not validate credentials",
+        )
+    
+
+    if token_data.sub is None:
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    # try:
+    #     user_id = uuid.UUID(token_data.sub)
+    # except ValueError:
+    #     raise HTTPException(status_code=401, detail="Invalid subject in token")
 
 
 
@@ -163,6 +230,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 agent.store = store
 
             vec_client = get_vec_client_timescale(get_postgres_connection_string())
+            print(get_postgres_connection_string())
             app.state.vec_client = vec_client
             print(type(vec_client))
             yield
@@ -173,6 +241,44 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app    = FastAPI(lifespan=lifespan)
+
+
+
+
+
+
+# --- Configure which frontends can call your API ---
+# Dev: Next.js on localhost:3000
+# Prod: replace with your real domain(s)
+DEFAULT_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:3000",
+]
+
+# # Optional: allow configuring via env var (comma-separated)
+# # e.g. FRONTEND_ORIGINS="http://localhost:3000,https://yourapp.com"
+# env_origins = [
+#     o.strip() for o in os.getenv("FRONTEND_ORIGINS", "").split(",") if o.strip()
+# ]
+# this and a lot of extra code will be transferred to core.settings
+env_origins = None
+
+ALLOWED_ORIGINS = env_origins or DEFAULT_ORIGINS
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=ALLOWED_ORIGINS,
+    allow_methods=["POST", "OPTIONS"],   # your endpoint is POST /.../stream
+    allow_headers=["*"],                 # accepts JSON + SSE
+    expose_headers=["x-vercel-ai-ui-message-stream"],  # let the browser read this if needed
+    allow_credentials=False,             # set True later if you use cookies across origins
+)
+
+
+
+
+
+
 router = APIRouter(dependencies=[Depends(verify_bearer)])
 
 
@@ -239,6 +345,8 @@ async def info() -> ServiceMetadata:
 # * Converts stream events to `ChatMessage` or tokens, emits as **SSE (`data: {...}`)**.
 # * Skips echoed human input and tool-use chunks.
 # * Ends with `data: [DONE]`.
+
+
 
 async def _handle_input(user_input: UserInput, agent: AgentGraph, vec_client: client.Async|None = None) -> tuple[dict[str, Any], UUID]:
     """
@@ -353,160 +461,147 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
 
 # https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
 # message:2 branch:8
+# from fastapi.responses import StreamingResponse
+# import json, inspect, uuid  # <-- add uuid (optional to import at top)
+
 async def message_generator(
     user_input: StreamInput, agent_id: str = DEFAULT_AGENT
 ) -> AsyncGenerator[str, None]:
-    """
-    Generate a stream of messages from the agent.
-
-    This is the workhorse method for the /stream endpoint.
-    """
     agent: AgentGraph = get_agent(agent_id)
-    
+    #kwargs, run_id = await _handle_input(user_input, agent, None)
+
+
     if agent_id == "self_corrective_rag" or "prototype_rag_tool":
         kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
     else:
         kwargs, run_id    = await _handle_input(user_input, agent, None)
 
+    # >>> NEW: ids + flags for UI message stream
+    msg_id   = f"msg_{uuid.uuid4().hex}"
+    text_id  = f"{msg_id}_t0"
+    started  = False  # sent text-start?
+    finished = False  # sent text-end/finish?
+
     try:
-        # Process streamed events from the graph and yield messages over the SSE stream.
-        async for stream_event in agent.astream(
-            **kwargs, stream_mode=["updates", "custom", "messages"]
-        ):
+        async for stream_event in agent.astream(**kwargs, stream_mode=["updates","custom","messages"]):
             if not isinstance(stream_event, tuple):
                 continue
-                
+
             stream_mode, event = stream_event
-            new_messages = []                                                ########
-            
+            new_messages = []
+
             if stream_mode == "updates":
-                for node, updates in event.items():
-                    # A simple approach to handle agent interrupts.
-                    # In a more sophisticated implementation, we could add
-                    # some structured ChatMessage type to return the interrupt value.
+                for node, updates in (event or {}).items():
                     if node == "__interrupt__":
                         interrupt: Interrupt
-                        for interrupt in updates:
+                        for interrupt in updates or []:
                             new_messages.append(AIMessage(content=interrupt.value))
                         continue
 
+                    update_messages = (updates or {}).get("messages", [])
 
-                        
-                    updates = updates or {}                                   #
-                    update_messages = updates.get("messages", [])             #
-                    
-                    # special cases for using langgraph-supervisor library
                     if node == "supervisor":
-                        # Get only the last AIMessage since supervisor includes all previous messages
-                        ai_messages = [msg for msg in update_messages if isinstance(msg, AIMessage)]
+                        ai_messages = [m for m in update_messages if isinstance(m, AIMessage)]
                         if ai_messages:
                             update_messages = [ai_messages[-1]]
-                            
+
                     if node in ("research_expert", "math_expert"):
-                        # By default the sub-agent output is returned as an AIMessage.
-                        # Convert it to a ToolMessage so it displays in the UI as a tool response.
-                        msg = ToolMessage(
-                            content      = update_messages[0].content,
-                            name         = node,
-                            tool_call_id = "",
-                        )
+                        msg = ToolMessage(content=update_messages[0].content, name=node, tool_call_id="")
                         update_messages = [msg]
-                    
-                    new_messages.extend(update_messages)                      #
 
-                    
-                    # if node == 'document_search':
-                    #     current_docs = [updates['documents'][i].model_dump_json() + "\n \n" for i in range(len(updates['documents']))]
-                    #     current_docs = "".join(current_docs)
-                    #     new_messages.append(AIMessage(content=current_docs))
-                    #     continue
+                    new_messages.extend(update_messages)
 
-
-
-            
             if stream_mode == "custom":
                 new_messages = [event]
 
+            processed_messages = []
+            current_message: dict[str, Any] = {}
 
-
-
-                
-            # LangGraph streaming may emit tuples: (field_name, field_value)
-            # e.g. ('content', <str>), ('tool_calls', [ToolCall,...]), ('additional_kwargs', {...}), etc.
-            # We accumulate only supported fields into `parts` and skip unsupported metadata.
-            # More info at: https://langchain-ai.github.io/langgraph/cloud/how-tos/stream_messages/            
-            processed_messages                 = []
-            current_message:    dict[str, Any] = {}
-            
             for message in new_messages:
                 if isinstance(message, tuple):
                     key, value = message
-                    # Store parts in temporary dict
                     current_message[key] = value
                 else:
-                    # Add complete message if we have one in progress
                     if current_message:
                         processed_messages.append(_create_ai_message(current_message))
                         current_message = {}
-                    processed_messages.append(message)    
-            # Add any remaining message parts
+                    processed_messages.append(message)
             if current_message:
                 processed_messages.append(_create_ai_message(current_message))
 
-                
             for message in processed_messages:
                 try:
-                    chat_message = langchain_to_chat_message(message)
-                    chat_message.run_id = str(run_id)
+                    if isinstance(message, str):
+                        chat_message        = ChatMessage(type="ai", content=message)
+                        chat_message.run_id = str(run_id)
+                    else:
+                        chat_message        = langchain_to_chat_message(message)
+                        chat_message.run_id = str(run_id)
+                    # chat_message        = langchain_to_chat_message(message)
+                    # chat_message.run_id = str(run_id)
                 except Exception as e:
                     logger.error(f"Error parsing message: {e}")
-                    yield f"data: {json.dumps({'type': 'error', 'content': 'Unexpected error'})}\n\n"
+                    # >>> CHANGED: UI stream error shape
+                    yield f"data: {json.dumps({'type': 'error', 'errorText': 'Unexpected error'})}\n\n"
                     continue
-                # LangGraph re-sends the input message, which feels weird, so drop it
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
-                yield f"data: {json.dumps({'type': 'message', 'content': chat_message.model_dump()})}\n\n"
 
+                if isinstance(message, str):
+                    token_text = message
 
+                    # >>> NEW: open the UI stream on first token
+                    if not started:
+                        yield f"data: {json.dumps({'type': 'start', 'messageId': msg_id})}\n\n"
+                        yield f"data: {json.dumps({'type': 'text-start', 'id': text_id})}\n\n"
+                        started = True
 
-            
+                    # >>> CHANGED: token -> text-delta
+                    yield f"data: {json.dumps({'type': 'text-delta', 'id': text_id, 'delta': token_text})}\n\n"
+                else:
+                    # >>> CHANGED: send as a custom data part (data-*) instead of "message"
+                    yield f"data: {json.dumps({'type': 'data-message', 'data': chat_message.model_dump()})}\n\n"
+
             if stream_mode == "messages":
-                if not user_input.stream_tokens: # default=True. see `schema.schema` -> `StreamInput`
+                if not user_input.stream_tokens:
                     continue
                 msg, metadata = event
                 if "skip_stream" in metadata.get("tags", []):
                     continue
-                # For some reason, astream("messages") causes non-LLM nodes to send extra messages.
-                # Drop them.
                 if not isinstance(msg, AIMessageChunk):
                     continue
+
                 content = remove_tool_calls(msg.content)
                 if content:
-                    # Empty content in the context of OpenAI usually means
-                    # that the model is asking for a tool to be invoked.
-                    # So we only print non-empty content.
-                    yield f"data: {json.dumps({'type': 'token', 'content': convert_message_content_to_string(content)})}\n\n"
+                    token_text = convert_message_content_to_string(content)
+
+                    # >>> NEW: open the UI stream on first token
+                    if not started:
+                        yield f"data: {json.dumps({'type': 'start', 'messageId': msg_id})}\n\n"
+                        yield f"data: {json.dumps({'type': 'text-start', 'id': text_id})}\n\n"
+                        started = True
+
+                    # >>> CHANGED: token -> text-delta
+                    yield f"data: {json.dumps({'type': 'text-delta', 'id': text_id, 'delta': token_text})}\n\n"
+
+        # >>> NEW: after the loop, close text if we opened it
+        if started and not finished:
+            yield f"data: {json.dumps({'type': 'text-end', 'id': text_id})}\n\n"
+            yield f"data: {json.dumps({'type': 'finish'})}\n\n"
+            finished = True
+
     except Exception as e:
         logger.error(f"Error in message generator: {e}")
-        yield f"data: {json.dumps({'type': 'error', 'content': 'Internal server error'})}\n\n"
+        # >>> CHANGED: UI stream error shape
+        yield f"data: {json.dumps({'type': 'error', 'errorText': 'Internal server error'})}\n\n"
     finally:
+        # >>> keep your termination marker last
         yield "data: [DONE]\n\n"
 
 
 
 
 
-# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
-# message:2 branch:10
-def _create_ai_message(parts: dict) -> AIMessage:
-    sig        = inspect.signature(AIMessage)
-    valid_keys = set(sig.parameters)
-    filtered   = {k: v for k, v in parts.items() if k in valid_keys}
-    return AIMessage(**filtered)
-
-
-# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
-# message:2 branch:10
 def _sse_response_example() -> dict[int | str, Any]:
     return {
         status.HTTP_200_OK: {
@@ -521,8 +616,7 @@ def _sse_response_example() -> dict[int | str, Any]:
     }
 
 
-# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
-# message:2 branch:10
+
 @router.post(
     "/{agent_id}/stream",
     response_class=StreamingResponse,
@@ -530,20 +624,19 @@ def _sse_response_example() -> dict[int | str, Any]:
 )
 @router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
 async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
-    """
-    Stream an agent's response to a user input, including intermediate messages and tokens.
-
-    If agent_id is not provided, the default agent will be used.
-    Use thread_id to persist and continue a multi-turn conversation. run_id kwarg
-    is also attached to all messages for recording feedback.
-    Use user_id to persist and continue a conversation across multiple threads.
-
-    Set `stream_tokens=false` to return intermediate messages but not token-by-token.
-    """
+    # >>> NEW: add the UI message stream header (no middleware)
+    headers = {
+        "x-vercel-ai-ui-message-stream": "v1",
+        "Cache-Control": "no-cache, no-transform",
+        "Connection": "keep-alive",
+    }
+#    print(user_input.model_dump())
     return StreamingResponse(
         message_generator(user_input, agent_id),
         media_type="text/event-stream",
+        headers=headers,  # <<< added
     )
+
 
 
 ######################################################################################################################################################

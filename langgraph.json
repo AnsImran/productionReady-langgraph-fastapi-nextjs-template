@@ -1,8 +1,8 @@
 {
-    "python_version": "3.12",
+    "python_version": "3.13",
     "dependencies": ["./src"],
     "graphs": {
-        "research_assistant": "./src/agents/research_assistant.py:research_assistant"
+        "basic_langgraph_agent": "./src/agents/basic_langgraph_agent.py:basic_langgraph_agent"
     },
     "env": "./.env"
 }
