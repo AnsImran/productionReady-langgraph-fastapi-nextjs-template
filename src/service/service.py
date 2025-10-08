@@ -6,9 +6,8 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID, uuid4
-import uuid
-import os
 
+from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi import APIRouter, Depends, FastAPI, HTTPException, status
 from fastapi.responses import StreamingResponse
@@ -21,9 +20,6 @@ from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
 from langgraph.types import Command, Interrupt
 from langsmith import Client as LangsmithClient
 from timescale_vector import client
-
-
-
 
 
 
@@ -72,32 +68,6 @@ from vector_databases import get_vec_client_timescale
 
 
 
-
-import jwt
-from jwt.exceptions import InvalidTokenError
-from pydantic import ValidationError
-import base64
-
-from sqlmodel import SQLModel
-
-class TokenPayload(SQLModel):
-    sub: str | None = None
-
-
-# Access API keys and credentials
-AUTH_SECRET : str
-ALGORITHM   : str
-
-
-# will later get them from core.settings and will put in core.settings from .env
-AUTH_SECRET = settings.AUTH_SECRET
-AUTH_SECRET_BYTES = base64.b64decode(AUTH_SECRET.get_secret_value().strip())
-ALGORITHM   = 'HS256'
-
-
-
-
-
 # This line suppresses **LangChain beta warnings** at runtime:
 # * `warnings.filterwarnings("ignore", category=LangChainBetaWarning)` tells Python to **ignore all `LangChainBetaWarning`** messages.
 # * These warnings appear when using **experimental or beta features** in LangChain.
@@ -114,13 +84,6 @@ warnings.filterwarnings("ignore", category=LangChainBetaWarning)
 # * Logging behavior (format, level, output) depends on the **global logging configuration**.
 # * Example log: `ERROR:service.api:Something went wrong`.
 logger = logging.getLogger(__name__)
-
-
-
-
-
-
-
 
 
 
@@ -143,39 +106,11 @@ def verify_bearer(
         Depends(HTTPBearer(description="Please provide AUTH_SECRET api key.", auto_error=False)),
     ],
 ) -> None:
-    """Simple bearer‑token check.
-
-    If AUTH_SECRET is unset → authentication is disabled.
-    Otherwise the request must send `Authorization: Bearer <AUTH_SECRET>`.
-    """
-    if not AUTH_SECRET_BYTES:  # auth disabled
+    if not settings.AUTH_SECRET:
         return
-    
-
-    if not http_auth or http_auth.scheme.lower() != "bearer":
-        raise HTTPException(status_code=403, detail="Not authenticated")
-    
-
-    token = http_auth.credentials
-    # Validate a token created by the external issuer (shared secret HS256 in this demo).
-    try:
-        print(token)
-        payload    = jwt.decode(token, AUTH_SECRET_BYTES, algorithms=[ALGORITHM], issuer="http://localhost:3000", audience="fastapi_agent_microservice") # settings.AUTH_SECRET.get_secret_value()
-        token_data = TokenPayload(**payload)
-        print(token_data.model_dump())
-    except (InvalidTokenError, ValidationError):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Could not validate credentials",
-        )
-    
-
-    if token_data.sub is None:
-        raise HTTPException(status_code=401, detail="Invalid token payload")
-    # try:
-    #     user_id = uuid.UUID(token_data.sub)
-    # except ValueError:
-    #     raise HTTPException(status_code=401, detail="Invalid subject in token")
+    auth_secret = settings.AUTH_SECRET.get_secret_value()
+    if not http_auth or http_auth.credentials != auth_secret:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
 
 
 
@@ -230,7 +165,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 agent.store = store
 
             vec_client = get_vec_client_timescale(get_postgres_connection_string())
-            print(get_postgres_connection_string())
             app.state.vec_client = vec_client
             print(type(vec_client))
             yield
@@ -241,11 +175,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 app    = FastAPI(lifespan=lifespan)
-
-
-
-
-
 
 # --- Configure which frontends can call your API ---
 # Dev: Next.js on localhost:3000
@@ -265,19 +194,26 @@ env_origins = None
 
 ALLOWED_ORIGINS = env_origins or DEFAULT_ORIGINS
 
+# app.add_middleware(
+#     CORSMiddleware,
+#     allow_origins=ALLOWED_ORIGINS,
+#     allow_methods=["POST", "OPTIONS"],   # your endpoint is POST /.../stream
+#     allow_headers=["*"],                 # accepts JSON + SSE
+#     expose_headers=["x-vercel-ai-ui-message-stream"],  # let the browser read this if needed
+#     allow_credentials=False,             # set True later if you use cookies across origins
+# )
+
+# temporarily allowing all origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["POST", "OPTIONS"],   # your endpoint is POST /.../stream
-    allow_headers=["*"],                 # accepts JSON + SSE
-    expose_headers=["x-vercel-ai-ui-message-stream"],  # let the browser read this if needed
-    allow_credentials=False,             # set True later if you use cookies across origins
+    allow_origins=["*"],                         # allow all origins (TEMP ONLY)
+    allow_methods=["*"],                         # or ["POST", "OPTIONS"] if you prefer stricter
+    allow_headers=["*"],                         # accept any request headers
+    expose_headers=["x-vercel-ai-ui-message-stream"],
+    allow_credentials=False,                     # must be False when using "*"
+    max_age=3600,                                # cache preflight for an hour
 )
-
-
-
-
-
+print('---temporarily allowed all origins---')
 
 router = APIRouter(dependencies=[Depends(verify_bearer)])
 
@@ -345,8 +281,6 @@ async def info() -> ServiceMetadata:
 # * Converts stream events to `ChatMessage` or tokens, emits as **SSE (`data: {...}`)**.
 # * Skips echoed human input and tool-use chunks.
 # * Ends with `data: [DONE]`.
-
-
 
 async def _handle_input(user_input: UserInput, agent: AgentGraph, vec_client: client.Async|None = None) -> tuple[dict[str, Any], UUID]:
     """
@@ -461,26 +395,31 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
 
 # https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
 # message:2 branch:8
-# from fastapi.responses import StreamingResponse
-# import json, inspect, uuid  # <-- add uuid (optional to import at top)
-
 async def message_generator(
     user_input: StreamInput, agent_id: str = DEFAULT_AGENT
 ) -> AsyncGenerator[str, None]:
+    """
+    Generate a stream of messages from the agent.
+
+    This is the workhorse method for the /stream endpoint.
+    """
     agent: AgentGraph = get_agent(agent_id)
-    #kwargs, run_id = await _handle_input(user_input, agent, None)
-
-
+    
     if agent_id == "self_corrective_rag" or "prototype_rag_tool":
         kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
     else:
         kwargs, run_id    = await _handle_input(user_input, agent, None)
 
     # >>> NEW: ids + flags for UI message stream
-    msg_id   = f"msg_{uuid.uuid4().hex}"
+    msg_id   = f"msg_{uuid4().hex}"
     text_id  = f"{msg_id}_t0"
-    started  = False  # sent text-start?
-    finished = False  # sent text-end/finish?
+
+    started  = False
+    finished = False
+    started_tool  = False  # sent text-start?
+    finished_tool = False  # sent text-end/finish?
+
+
 
     try:
         async for stream_event in agent.astream(**kwargs, stream_mode=["updates","custom","messages"]):
@@ -547,20 +486,44 @@ async def message_generator(
                 if chat_message.type == "human" and chat_message.content == user_input.message:
                     continue
 
-                if isinstance(message, str):
-                    token_text = message
 
-                    # >>> NEW: open the UI stream on first token
-                    if not started:
-                        yield f"data: {json.dumps({'type': 'start', 'messageId': msg_id})}\n\n"
-                        yield f"data: {json.dumps({'type': 'text-start', 'id': text_id})}\n\n"
-                        started = True
 
-                    # >>> CHANGED: token -> text-delta
-                    yield f"data: {json.dumps({'type': 'text-delta', 'id': text_id, 'delta': token_text})}\n\n"
-                else:
-                    # >>> CHANGED: send as a custom data part (data-*) instead of "message"
-                    yield f"data: {json.dumps({'type': 'data-message', 'data': chat_message.model_dump()})}\n\n"
+
+                if chat_message.type == "ai" and chat_message.tool_calls:
+                    for tool_call in chat_message.tool_calls:
+                        tool_name = tool_call.get("name", "")
+                        tool_call_id = tool_call.get("id") or f"call_{uuid4().hex}"
+                        yield (
+                            f"data: {json.dumps({'type': 'tool-input-start', 'toolCallId': tool_call_id, 'toolName': tool_name})}\n\n"
+                        )
+
+                        tool_args = tool_call.get("args") or {}
+                        if tool_args:
+                            yield (
+                                f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
+                            )
+
+                        yield (
+                            f"data: {json.dumps({'type': 'tool-input-available', 'toolCallId': tool_call_id, 'toolName': tool_name, 'input': tool_args})}\n\n"
+                        )
+
+                if chat_message.type == "tool":
+                    tool_call_id = chat_message.tool_call_id or f"call_{uuid4().hex}"
+                    tool_output: Any
+                    try:
+                        tool_output = json.loads(chat_message.content)
+                    except json.JSONDecodeError:
+                        tool_output = chat_message.content
+
+                    yield (
+                        f"data: {json.dumps({'type': 'tool-output-available', 'toolCallId': tool_call_id, 'output': tool_output})}\n\n"
+                    )
+
+                # yield f"data: {json.dumps({'type': 'data-message', 'data': chat_message.model_dump()})}\n\n"
+
+
+
+
 
             if stream_mode == "messages":
                 if not user_input.stream_tokens:
@@ -602,6 +565,17 @@ async def message_generator(
 
 
 
+# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
+# message:2 branch:10
+def _create_ai_message(parts: dict) -> AIMessage:
+    sig        = inspect.signature(AIMessage)
+    valid_keys = set(sig.parameters)
+    filtered   = {k: v for k, v in parts.items() if k in valid_keys}
+    return AIMessage(**filtered)
+
+
+# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
+# message:2 branch:10
 def _sse_response_example() -> dict[int | str, Any]:
     return {
         status.HTTP_200_OK: {
@@ -616,27 +590,51 @@ def _sse_response_example() -> dict[int | str, Any]:
     }
 
 
-
+# https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
+# message:2 branch:10
 @router.post(
     "/{agent_id}/stream",
     response_class=StreamingResponse,
     responses=_sse_response_example(),
 )
 @router.post("/stream", response_class=StreamingResponse, responses=_sse_response_example())
-async def stream(user_input: StreamInput, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
+async def stream(user_input: StreamInput, request:Request, agent_id: str = DEFAULT_AGENT) -> StreamingResponse:
+    """
+    Stream an agent's response to a user input, including intermediate messages and tokens.
+
+    If agent_id is not provided, the default agent will be used.
+    Use thread_id to persist and continue a multi-turn conversation. run_id kwarg
+    is also attached to all messages for recording feedback.
+    Use user_id to persist and continue a conversation across multiple threads.
+
+    Set `stream_tokens=false` to return intermediate messages but not token-by-token.
+    """
     # >>> NEW: add the UI message stream header (no middleware)
     headers = {
         "x-vercel-ai-ui-message-stream": "v1",
         "Cache-Control": "no-cache, no-transform",
         "Connection": "keep-alive",
     }
-#    print(user_input.model_dump())
+
+    # If auth is enabled and dependency set user_id, prefer it
+    jwt_sub = getattr(request.state, "jwt_sub", None)
+    if jwt_sub:
+        user_input.user_id = jwt_sub
+    # print('user_id from stream endpoint', user_input.user_id)
+    
+    obj = await request.json()
+    # convert to indented JSON string
+    pretty = json.dumps(obj, indent=2, ensure_ascii=False)
+
+    print(pretty)
+
+
+
     return StreamingResponse(
         message_generator(user_input, agent_id),
         media_type="text/event-stream",
         headers=headers,  # <<< added
     )
-
 
 
 ######################################################################################################################################################
