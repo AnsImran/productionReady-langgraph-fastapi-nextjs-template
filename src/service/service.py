@@ -493,15 +493,18 @@ async def message_generator(
                     for tool_call in chat_message.tool_calls:
                         tool_name = tool_call.get("name", "")
                         tool_call_id = tool_call.get("id") or f"call_{uuid4().hex}"
+                        started_tool = True
+                        yield f"data: {json.dumps({'type': 'start'})}\n\n"
+                        yield f"data: {json.dumps({"type": "start-step"})}\n\n"
                         yield (
                             f"data: {json.dumps({'type': 'tool-input-start', 'toolCallId': tool_call_id, 'toolName': tool_name})}\n\n"
                         )
 
                         tool_args = tool_call.get("args") or {}
                         if tool_args:
-                            yield (
-                                f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
-                            )
+                            yield f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
+                            yield f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
+                            
 
                         yield (
                             f"data: {json.dumps({'type': 'tool-input-available', 'toolCallId': tool_call_id, 'toolName': tool_name, 'input': tool_args})}\n\n"
@@ -515,9 +518,10 @@ async def message_generator(
                     except json.JSONDecodeError:
                         tool_output = chat_message.content
 
-                    yield (
-                        f"data: {json.dumps({'type': 'tool-output-available', 'toolCallId': tool_call_id, 'output': tool_output})}\n\n"
-                    )
+                    yield f"data: {json.dumps({'type': 'tool-output-available', 'toolCallId': tool_call_id, 'output': tool_output})}\n\n"
+                    yield f"data: {json.dumps({"type": "finish-step"})}\n\n"
+                    finished_tool = True # can use it for checking if tool-message was successful
+                    
 
                 # yield f"data: {json.dumps({'type': 'data-message', 'data': chat_message.model_dump()})}\n\n"
 
@@ -540,7 +544,10 @@ async def message_generator(
 
                     # >>> NEW: open the UI stream on first token
                     if not started:
-                        yield f"data: {json.dumps({'type': 'start', 'messageId': msg_id})}\n\n"
+                        if started_tool == False:
+                          yield f"data: {json.dumps({'type': 'start', 'messageId': msg_id})}\n\n"
+
+                        yield f"data: {json.dumps({"type": "start-step"})}\n\n"
                         yield f"data: {json.dumps({'type': 'text-start', 'id': text_id})}\n\n"
                         started = True
 
@@ -550,6 +557,7 @@ async def message_generator(
         # >>> NEW: after the loop, close text if we opened it
         if started and not finished:
             yield f"data: {json.dumps({'type': 'text-end', 'id': text_id})}\n\n"
+            yield f"data: {json.dumps({"type": "finish-step"})}\n\n"
             yield f"data: {json.dumps({'type': 'finish'})}\n\n"
             finished = True
 
