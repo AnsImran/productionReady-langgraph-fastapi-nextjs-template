@@ -503,9 +503,8 @@ async def message_generator(
                         tool_args = tool_call.get("args") or {}
                         if tool_args:
                             yield f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
-                            yield f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
                             
-
+                            
                         yield (
                             f"data: {json.dumps({'type': 'tool-input-available', 'toolCallId': tool_call_id, 'toolName': tool_name, 'input': tool_args})}\n\n"
                         )
