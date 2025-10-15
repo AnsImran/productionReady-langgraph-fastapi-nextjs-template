@@ -169,6 +169,7 @@ GENERIC_RESPONSE_PROMPT = ChatPromptTemplate.from_messages([
      "Examples of when to keep it generic: greetings, thanks, farewells, smalltalk, name introductions, confirmations ('ok', 'got it'), emoji/test messages, or basic site/navigation queries. "
      "If it's navigation/basic help, briefly answer and offer next steps (e.g., 'I can help you choose a service or look something up.'). "
      "Do NOT invent firm-specific facts. Do NOT mention documents or vector search."
+     "If the user is asking for help with something other than accountancy or accounting, gently say no."
     ),
     ("human", "{question}")
 ])
@@ -288,29 +289,28 @@ async def query_relevance(state: AgentState, config: RunnableConfig) -> AgentSta
 ## isay history deni ho tu simply last 3,4 messages ko keys str main convert kr k, pass kr dena isay ...
 ## yani last 4 messages + append the current question and that's it!
 ## yani question vala string hi fn k andr update ho jaye ga ...
-async def query_relevance_router(state: Input_State, config: RunnableConfig) -> Literal["intent_decider", "cant_help"]:
+# 1) Change the router's return type + branch target
+async def query_relevance_router(state: Input_State, config: RunnableConfig) -> Literal["intent_decider", "handle_generic"]:
     """
     First gate: is the message related to accounting/this site?
     If yes -> go to a new intent router that decides between generic reply vs doc search.
-    If no  -> 'cant_help'.
+    If no  -> 'handle_generic'.   # CHANGED from 'cant_help'
     """
     question = state.question
     if VERBOSE:
         print("---CHECK RELEVANCE---")
 
-    # Initialize the model
     llm = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
-    
     grader = (RELEVANCE_GRADER_PROMPT | llm.with_structured_output(GradeRelevance)).with_config(tags=["skip_stream"])
     relevance_grade: GradeRelevance = await grader.ainvoke({"query": question})
 
     if relevance_grade.binary_score == "yes":
         if VERBOSE: print("---DECISION: QUERY/QUESTION <IS RELATED> TO ACCOUNTING---")
-        # NEW: route to the intent decider node instead of direct doc search
         return "intent_decider"
     else:
         if VERBOSE: print("---DECISION: QUERY/QUESTION <IS NOT RELATED> TO ACCOUNTING---")
-        return "cant_help"
+        return "handle_generic"   # CHANGED from 'cant_help'
+
 
 
 ################################################################################################################
@@ -693,8 +693,14 @@ graph.add_node("cant_help",         cant_help)
 graph.add_node("handle_generic",    handle_generic)  # NEW
 graph.add_node("finalize_response", finalize_response)
 
-# 1) First gate: relevance (existing logic, but now routes to intent_decider)
-graph.add_conditional_edges("query_relevance", query_relevance_router, ["cant_help", "intent_decider"])
+# 1) Update the conditional edges for the first gate
+#    (swap 'cant_help' → 'handle_generic')
+graph.add_conditional_edges(
+    "query_relevance",
+    query_relevance_router,
+    ["handle_generic", "intent_decider"]
+)
+
 
 # 2) Second gate: inside-accounting messages only — decide generic vs doc search
 graph.add_conditional_edges("intent_decider", accounting_intent_router, ["handle_generic", "route_vec_client"])
