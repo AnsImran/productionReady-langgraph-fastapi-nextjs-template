@@ -97,13 +97,25 @@ class GradeAnswer(BaseModel):
 class Input_State(BaseModel):
     question: str = Field(description="Question asked by the user.")
 
-
-
+# NEW: Intent router schema (decides whether to respond generically or go to doc search)
+class AccountingIntent(BaseModel):
+    """
+    Decide if the message needs document search ('doc_search') or a short generic reply ('generic_response').
+    """
+    route: Literal["generic_response", "doc_search"] = Field(
+        description="High-level routing decision."
+    )
+    category: str = Field(
+        description="Short label like greeting, thanks, goodbye, smalltalk, navigation, general_query, etc."
+    )
+    rationale: str = Field(
+        description="One sentence explaining why this route was chosen."
+    )
 
 ################################################################################################################
 ## Define Prompts
 RELEVANCE_GRADER_PROMPT = ChatPromptTemplate.from_messages([
-    ("system", "You are a grader assessing whether the user's query/question is related to accounting/accountance or accounting firm. Give a binary score 'yes' or 'no'."),
+    ("system", "You are a `self corrective RAG agent`, on the website of an accounting firm. This accounting firm offers multiple accountancy related services. While browsing through the offered accountacy services, a user may ask about words, legal terms, or any confusing part. Your job is to guide them so that they understand what the accountancy firm is offering. TASK: Decide if the user's message is relevant to Accounting/Accountancy services or not. Return ONLY a binary score: 'yes' or 'no'. Mark as 'yes' if the message concerns: using the accountancy website; choosing/finding the right service/service-name; understanding or answering accountancy related concepts (You do not have access to all the services data itself, so you must infer. If the message appears to come from a user interested in accountancy services, classify as 'yes'.); definitions of legal/immigration terms; document requirements; site navigation or technical issues; or general greetings/openers while using the service. Do NOT classify greetings as 'no'. Do NOT classify as 'no' when a user tells you his/her name. Mark as 'no' only if the message is clearly unrelated to accounting/accountancy or the firm's website or the firm itself."),
     ("human", "The query/question of user: \n {query}")
 ])
 
@@ -135,6 +147,30 @@ QUERY_REWRITER_PROMPT = ChatPromptTemplate.from_messages([
 RAG_PROMPT = ChatPromptTemplate.from_messages([
     ("system", "You are a chatbot assistant on the website of an accounting firm. Use the following pieces of retrieved context to answer the question. If you don't know the answer, say so. Keep it concise."),
     ("human", "\nQuestion: {question} \nContext: {context} \nAnswer:")
+])
+
+# NEW: Accounting intent classifier prompt (runs AFTER relevance == yes)
+ACCOUNTING_INTENT_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are an intent classifier for an accounting firm's website. "
+     "Goal: If the user's message clearly calls for a quick generic reply (e.g., greeting, thanks, goodbye, smalltalk, name introductions, confirmations like 'ok', emoji/test messages, simple navigation/website help like 'how do I contact you?', or generally polite chit-chat), route to 'generic_response'. "
+     "If the user is asking for accounting knowledge, service details, pricing specifics, compliance/audit questions, tax/legal specifics, or anything that benefits from documents, route to 'doc_search'. "
+     "Avoid doc search for pure pleasantries or acknowledgements. Return a JSON object conforming to the provided schema."
+    ),
+    ("human", "User message: {question}")
+])
+
+# NEW: Generator for generic responses (short, friendly, no doc search)
+GENERIC_RESPONSE_PROMPT = ChatPromptTemplate.from_messages([
+    ("system",
+     "You are a helpful, polite assistant for an accounting firm's website. "
+     "The user's last message does NOT require document lookup. "
+     "Reply in 1–2 short sentences. Keep it neutral and welcoming. "
+     "Examples of when to keep it generic: greetings, thanks, farewells, smalltalk, name introductions, confirmations ('ok', 'got it'), emoji/test messages, or basic site/navigation queries. "
+     "If it's navigation/basic help, briefly answer and offer next steps (e.g., 'I can help you choose a service or look something up.'). "
+     "Do NOT invent firm-specific facts. Do NOT mention documents or vector search."
+    ),
+    ("human", "{question}")
 ])
 
 
@@ -252,7 +288,12 @@ async def query_relevance(state: AgentState, config: RunnableConfig) -> AgentSta
 ## isay history deni ho tu simply last 3,4 messages ko keys str main convert kr k, pass kr dena isay ...
 ## yani last 4 messages + append the current question and that's it!
 ## yani question vala string hi fn k andr update ho jaye ga ...
-async def query_relevance_router(state: Input_State, config: RunnableConfig) -> Literal["route_vec_client", "cant_help"]:
+async def query_relevance_router(state: Input_State, config: RunnableConfig) -> Literal["intent_decider", "cant_help"]:
+    """
+    First gate: is the message related to accounting/this site?
+    If yes -> go to a new intent router that decides between generic reply vs doc search.
+    If no  -> 'cant_help'.
+    """
     question = state.question
     if VERBOSE:
         print("---CHECK RELEVANCE---")
@@ -265,10 +306,32 @@ async def query_relevance_router(state: Input_State, config: RunnableConfig) -> 
 
     if relevance_grade.binary_score == "yes":
         if VERBOSE: print("---DECISION: QUERY/QUESTION <IS RELATED> TO ACCOUNTING---")
-        return "route_vec_client"
+        # NEW: route to the intent decider node instead of direct doc search
+        return "intent_decider"
     else:
         if VERBOSE: print("---DECISION: QUERY/QUESTION <IS NOT RELATED> TO ACCOUNTING---")
         return "cant_help"
+
+
+################################################################################################################
+# NEW: Second gate AFTER relevance — decide between generic response vs document search
+async def accounting_intent_router(state: Input_State, config: RunnableConfig) -> Literal["handle_generic", "route_vec_client"]:
+    """
+    Decide if the user needs a quick generic reply (greetings/thanks/goodbye/smalltalk/confirmations/navigation help)
+    or if we should head to document search for substantive accounting/service questions.
+    """
+    question = state.question
+    if VERBOSE:
+        print("---ACCOUNTING INTENT ROUTER---")
+
+    llm = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    classifier = (ACCOUNTING_INTENT_PROMPT | llm.with_structured_output(AccountingIntent)).with_config(tags=["skip_stream"])
+    intent: AccountingIntent = await classifier.ainvoke({"question": question})
+
+    if VERBOSE:
+        print(f"---INTENT: route={intent.route} category={intent.category}---")
+
+    return "handle_generic" if intent.route == "generic_response" else "route_vec_client"
 
 
 ################################################################################################################
@@ -582,11 +645,24 @@ async def cant_help(state: AgentState, config: RunnableConfig, writer: StreamWri
 
 
 ################################################################################################################
+# NEW: Generic response generator node (used when intent router decides no doc search is needed)
+async def handle_generic(state: AgentState, config: RunnableConfig) -> AgentState:
+    if VERBOSE:
+        print("---HANDLE GENERIC RESPONSE---")
+
+    llm = get_model(config["configurable"].get("model", settings.DEFAULT_MODEL))
+    chain = GENERIC_RESPONSE_PROMPT | llm | StrOutputParser()
+    text = await chain.ainvoke({"question": state["question"]})
+    return {"candidate_answer": text}
+
+
+################################################################################################################
 ## Finalize Response
 async def finalize_response(state: AgentState, config: RunnableConfig) -> AgentState:
     if VERBOSE:
         print("---FINALIZING THE RESPONSE---")
-        return {"messages": [AIMessage(content=state["candidate_answer"])]}
+    # Always return a message, regardless of VERBOSE
+    return {"messages": [AIMessage(content=state.get("candidate_answer", ""))]}
 
 
 
@@ -601,26 +677,40 @@ tool_node = ToolNode(tools)
 graph.set_entry_point("query_relevance")
 
 graph.add_node("query_relevance",   query_relevance)
+
+# NEW: A lightweight node to host the second router (generic vs doc search)
+# It doesn't need to do any work; the conditional router will decide the next step.
+async def intent_decider(state: AgentState, config: RunnableConfig) -> AgentState:
+    return state
+graph.add_node("intent_decider", intent_decider)
+
 graph.add_node("route_vec_client",    route_vec_client)
 graph.add_node("docs_retrieval_tool", tool_node)
 # graph.add_node("document_search",   document_search)
 graph.add_node("generate",          generate)
 graph.add_node("transform_query",   transform_query)
 graph.add_node("cant_help",         cant_help)
+graph.add_node("handle_generic",    handle_generic)  # NEW
 graph.add_node("finalize_response", finalize_response)
 
-graph.add_conditional_edges("query_relevance", query_relevance_router, ["cant_help", "route_vec_client"])#"document_search"])
+# 1) First gate: relevance (existing logic, but now routes to intent_decider)
+graph.add_conditional_edges("query_relevance", query_relevance_router, ["cant_help", "intent_decider"])
+
+# 2) Second gate: inside-accounting messages only — decide generic vs doc search
+graph.add_conditional_edges("intent_decider", accounting_intent_router, ["handle_generic", "route_vec_client"])
+
+# 3) If doc search is needed, proceed as before
 graph.add_edge("route_vec_client",     "docs_retrieval_tool")
 graph.add_edge("docs_retrieval_tool",  "generate")
-# graph.add_edge("document_search", "generate")
+
+# 4) RAG loop quality control as before
 graph.add_conditional_edges("generate", grade_generation_v_documents_and_question, ["generate", "transform_query", "cant_help", "finalize_response"])
-graph.add_edge("transform_query", "route_vec_client")#"document_search"])
+graph.add_edge("transform_query", "route_vec_client")  # can trigger doc search again
 graph.add_edge("cant_help", "finalize_response")
+
+# 5) Generic path ends cleanly
+graph.add_edge("handle_generic", "finalize_response")
+
 graph.add_edge("finalize_response", END)
 
 self_corrective_rag = graph.compile()
-
-
-
-
-

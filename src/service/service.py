@@ -6,6 +6,7 @@ from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Annotated, Any
 from uuid import UUID, uuid4
+import hashlib, time
 
 from fastapi import Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -410,6 +411,26 @@ async def message_generator(
     else:
         kwargs, run_id    = await _handle_input(user_input, agent, None)
 
+
+    # Build a stable key for this conversation thread
+    session_key = f"{agent_id}:{getattr(user_input, 'thread_id', None) or 'no_thread'}:{getattr(user_input, 'user_id', None) or 'anon'}"
+
+    # Global-ish store in app.state: { session_key: {"inputs": set(), "outputs": set(), "ts": float} }
+    if not hasattr(app.state, "tool_sse_seen"):
+        app.state.tool_sse_seen = {}
+
+    # TTL + light cleanup to avoid unbounded memory
+    TTL_SECONDS = 60 * 60  # 1 hour
+    NOW = time.time()
+    # opportunistic cleanup
+    for k, v in list(app.state.tool_sse_seen.items()):
+        if (NOW - v.get("ts", NOW)) > TTL_SECONDS:
+            app.state.tool_sse_seen.pop(k, None)
+
+    thread_seen = app.state.tool_sse_seen.setdefault(session_key, {"inputs": set(), "outputs": set(), "ts": NOW})
+    thread_seen["ts"] = NOW  # touch
+
+
     # >>> NEW: ids + flags for UI message stream
     msg_id   = f"msg_{uuid4().hex}"
     text_id  = f"{msg_id}_t0"
@@ -492,34 +513,54 @@ async def message_generator(
                 if chat_message.type == "ai" and chat_message.tool_calls:
                     for tool_call in chat_message.tool_calls:
                         tool_name = tool_call.get("name", "")
-                        tool_call_id = tool_call.get("id") or f"call_{uuid4().hex}"
+                        tool_args = tool_call.get("args") or {}
+                        raw_id    = tool_call.get("id")
+
+                        # Stable fingerprint for assistant->tool input
+                        fp_source = raw_id or f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+                        fp_in = hashlib.sha1(fp_source.encode("utf-8")).hexdigest()
+
+                        # Skip if this exact input was already streamed for this thread
+                        if fp_in in thread_seen["inputs"]:
+                            continue
+                        thread_seen["inputs"].add(fp_in)
+
+                        # Use original id if present; otherwise deterministic from fp
+                        tool_call_id = raw_id or f"call_{fp_in}"
+
                         started_tool = True
                         yield f"data: {json.dumps({'type': 'start'})}\n\n"
-                        yield f"data: {json.dumps({"type": "start-step"})}\n\n"
-                        yield (
-                            f"data: {json.dumps({'type': 'tool-input-start', 'toolCallId': tool_call_id, 'toolName': tool_name})}\n\n"
-                        )
+                        yield f"data: {json.dumps({'type': 'start-step'})}\n\n"
+                        yield f"data: {json.dumps({'type': 'tool-input-start', 'toolCallId': tool_call_id, 'toolName': tool_name})}\n\n"
 
-                        tool_args = tool_call.get("args") or {}
                         if tool_args:
                             yield f"data: {json.dumps({'type': 'tool-input-delta', 'toolCallId': tool_call_id, 'inputTextDelta': json.dumps(tool_args)})}\n\n"
-                            
-                            
-                        yield (
-                            f"data: {json.dumps({'type': 'tool-input-available', 'toolCallId': tool_call_id, 'toolName': tool_name, 'input': tool_args})}\n\n"
-                        )
+
+                        yield f"data: {json.dumps({'type': 'tool-input-available', 'toolCallId': tool_call_id, 'toolName': tool_name, 'input': tool_args})}\n\n"
 
                 if chat_message.type == "tool":
-                    tool_call_id = chat_message.tool_call_id or f"call_{uuid4().hex}"
-                    tool_output: Any
+                    raw_tool_call_id = chat_message.tool_call_id  # may be None
+                    # Parse output for stable hashing
                     try:
-                        tool_output = json.loads(chat_message.content)
+                        tool_output: Any = json.loads(chat_message.content)
                     except json.JSONDecodeError:
                         tool_output = chat_message.content
 
+                    out_norm = json.dumps(tool_output, sort_keys=True) if isinstance(tool_output, (dict, list)) else str(tool_output)
+                    fp_source = f"{raw_tool_call_id or ''}:{out_norm}"
+                    fp_out = hashlib.sha1(fp_source.encode("utf-8")).hexdigest()
+
+                    # Skip if this exact output was already streamed for this thread
+                    if fp_out in thread_seen["outputs"]:
+                        continue
+                    thread_seen["outputs"].add(fp_out)
+
+                    tool_call_id = raw_tool_call_id or f"call_{fp_out}"
+
                     yield f"data: {json.dumps({'type': 'tool-output-available', 'toolCallId': tool_call_id, 'output': tool_output})}\n\n"
-                    yield f"data: {json.dumps({"type": "finish-step"})}\n\n"
-                    finished_tool = True # can use it for checking if tool-message was successful
+                    yield f"data: {json.dumps({'type': 'finish-step'})}\n\n"
+                    finished_tool = True
+
                     
 
                 # yield f"data: {json.dumps({'type': 'data-message', 'data': chat_message.model_dump()})}\n\n"

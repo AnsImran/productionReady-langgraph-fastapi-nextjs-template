@@ -1,0 +1,184 @@
+SUPER COMMIT: collection of many commits — see details  in commit body below
+
+---
+
+this commit brings together a large collection of changes, updates, and refactors made while integrating a **Next.js frontend** (originally from [vercel/ai-chatbot](https://github.com/vercel/ai-chatbot)) with a **Python FastAPI-based AI microservice**. the main purpose of this work was to build a **template for connecting a Next.js web app to a python microservice**, in a way that cleanly supports **streaming AI responses, RAG tool usage, and history hydration**, while keeping the frontend modern and production-friendly.
+
+the original vercel repo included both frontend and backend parts, but for our case we’ve focused only on the **frontend** and replaced the backend logic with a dedicated **FastAPI microservice** that handles all AI-related work. this makes it easier to scale, update models, and iterate quickly since ML work happens mostly in python while web experience is best handled in next.js.
+
+for production setups, a **Backend-for-Frontend (BFF)** approach is recommended (where next.js backend talks to the microservice). but for development and clarity, this template connects next.js directly to the microservice using secure headers and server-sent events (SSE).
+
+---
+
+SUMMARY OF CHANGES
+
+* switched the chat transport from next.js’s built-in `/api/chat` route to our FastAPI microservice endpoints.
+* added proper streaming and request formatting so the frontend now talks to the microservice exactly as defined in its swagger and stream specs.
+* connected the chat history endpoint from the microservice to next.js so previous threads can be hydrated in the ui.
+* integrated **RAG tool streaming** support using ai-sdk-ui’s stream protocol so tool calls show up live during assistant replies.
+* added **Generative UI** components for the new tool responses (collapsible panels, metadata cards, score badges, etc).
+* kept the auth system untouched (works as before).
+* simplified chat creation and title logic (titles generated once from first message).
+* preserved db-backed sidebar history and chat persistence.
+* added env-based config for easy container use and clear separation between frontend and microservice urls.
+
+---
+
+WHY THIS CHANGE
+
+python keeps leading ML innovation — new AI libraries and features appear there first. but for user-facing web apps, next.js offers the best developer experience. connecting them cleanly allows fast iteration on both sides:
+
+* the **microservice** evolves independently, handles AI work, and exposes fast streaming endpoints.
+* the **next.js frontend** provides the polished chat interface and renders live results.
+  this structure also improves scalability and security, and it mirrors how modern AI products are typically built.
+
+---
+
+WHAT CHANGED (HIGH LEVEL)
+
+**FastAPI Integration**
+
+* the `useChat` hook now sends chat requests directly to the FastAPI stream endpoint (instead of `/api/chat`).
+* the POST body now matches the microservice swagger spec: includes `message`, `model`, `thread_id`, `user_id`, `agent_config`, and `stream_tokens`.
+* added proper SSE headers and reconnected the response stream using ai-sdk-ui’s expected event format.
+* added `FASTAPI_BASE_URL` and `NEXT_PUBLIC_FASTAPI_BASE_URL` envs so both browser and server can reach the microservice (e.g. `http://host.docker.internal:8080` for containers).
+
+**History Hydration**
+
+* when a chat page loads, the app now sends a POST request to the microservice `/history` endpoint using the thread_id.
+* the response is parsed into ai-sdk-ui message parts — both normal text and streamed tool parts.
+* tool messages are reconstructed:
+
+  * assistant tool calls → “dynamic-tool” (state = input-available).
+  * tool responses → “dynamic-tool” (state = output-available).
+    this ensures reloaded chats render tool panels exactly like they did when first streamed live.
+
+**Server-Side Tools (RAG) & Generative UI**
+
+* implemented full ai-sdk-ui stream protocol for tool parts: `input-streaming`, `input-available`, `output-streaming`, `output-available`, and `output-error`.
+* added a renderer for the `get_docs_timescale` tool that shows results in collapsible cards with snippet previews, metadata, badges, and links.
+* unknown or fallback tools safely render as JSON blocks.
+* the overall look now matches the generative UI guidelines from ai-sdk.dev.
+
+**Models, Agent & Transport Details**
+
+* ui model list updated to reflect models available in the microservice, like:
+
+  * `gpt-4.1-nano-2025-04-14`
+  * `gpt-4o`
+  * `gpt-4o-mini` *(default)*
+  * `gpt-5-nano-2025-08-07`
+* agent switched to `self_corrective_rag` which supports tool streaming.
+* minimal mappings added in provider files to keep UI logic working while the actual generation happens in the microservice.
+
+**Chat Creation & Title Logic**
+
+* chats are now lazily created — the backend only creates a chat record after the user sends their first message.
+* a title is automatically generated from that first message (trimmed to 80 chars).
+* the sidebar refreshes to show the new chat once it’s created.
+
+**Auth**
+
+* authentication logic remains the same as in the original vercel app.
+* the FastAPI service already supports JWT; in a future step, jwt verification can be added on the next.js side for secure production setups.
+
+---
+
+KEY IMPLEMENTATION NOTES
+
+**Transport & Config**
+
+* `components/chat.tsx` handles posting to FastAPI stream endpoints and formatting requests.
+* `lib/config.ts` defines new envs:
+
+  * `FASTAPI_BASE_URL`, `NEXT_PUBLIC_FASTAPI_BASE_URL`, `FASTAPI_HISTORY_ENDPOINT`, `FASTAPI_AGENT_ID`.
+  * default agent: `self_corrective_rag`.
+  * container-safe defaults use `host.docker.internal`.
+
+**History Reconstruction**
+
+* `app/(chat)/chat/[id]/page.tsx` now calls the FastAPI `/history` endpoint and merges that into local ui state.
+* `lib/utils.ts` includes conversion logic that rebuilds all ai messages (text + tools) from microservice output.
+
+**Generative UI Rendering**
+
+* `components/timescale-tool.tsx` renders results for the RAG tool.
+* `components/message.tsx` routes dynamic-tool messages to their renderer.
+* `components/elements/tool.tsx` updates badges and visual states for tool streaming.
+
+**Models & Provider Mapping**
+
+* `lib/ai/models.ts` lists available model ids.
+* `lib/ai/providers.ts` includes fallback mappings so the app remains compatible with ai-sdk-ui utilities.
+
+**Title Flow & Lazy Chat Creation**
+
+* logic for ensuring chat titles moved into `app/(chat)/actions.ts` (function `ensureChatTitle`).
+* triggered automatically after the first user message, persists the title, and refreshes sidebar history.
+
+---
+
+ENVIRONMENT SETUP (for dev containers)
+
+Recommended `.env.local` setup:
+
+```
+AUTH_SECRET=<random-32-bytes>
+POSTGRES_URL=postgresql://postgres:password@host.docker.internal:5431/<db-name>
+FASTAPI_BASE_URL=http://host.docker.internal:8080
+NEXT_PUBLIC_FASTAPI_BASE_URL=http://localhost:8080
+FASTAPI_AGENT_ID=self_corrective_rag
+```
+
+when running inside a container, if port 3000 is taken, next.js may forward to 3001 or another port automatically.
+to make the dev server accessible on all interfaces:
+`pnpm run dev -- --hostname 0.0.0.0`
+
+---
+
+FILES MOST AFFECTED
+
+```
+components/chat.tsx
+components/message.tsx
+components/elements/tool.tsx
+components/timescale-tool.tsx
+app/(chat)/chat/[id]/page.tsx
+app/(chat)/page.tsx
+app/(chat)/actions.ts
+lib/utils.ts
+lib/config.ts
+lib/ai/models.ts
+lib/ai/providers.ts
+```
+
+---
+
+REFERENCE LINKS
+
+```
+Original template: https://github.com/vercel/ai-chatbot
+AI SDK stream protocol: https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol
+Generative UI patterns: https://ai-sdk.dev/docs/ai-sdk-ui/generative-user-interfaces
+Tool usage in chat UIs: https://ai-sdk.dev/docs/ai-sdk-ui/chatbot-tool-usage
+```
+
+---
+
+RELATED WORK / JOURNEY
+
+these changes are part of my ongoing exploration of ai-sdk-ui and its streaming/generative capabilities, documented here:
+blog: https://m-ans-imran.blogspot.com/
+repo: https://github.com/AnsImran/next.js-ai_sdk-from-scratch
+
+development history can be traced in:
+- `main` branch: early transport + history integration
+- `tool-usage` branch: tool streaming + generative ui features
+- https://github.com/AnsImran/next.js-ai_sdk-from-scratch/tree/tool-usage
+
+---
+
+NOTES
+
+the unused next.js backend routes from the original vercel repo remain in place. they’re harmless and can later be adapted or replaced as more logic moves behind the FastAPI service or a dedicated BFF layer. keeping them provides flexibility for future extensions.
+
