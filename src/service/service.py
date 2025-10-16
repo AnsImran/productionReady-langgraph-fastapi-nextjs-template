@@ -62,7 +62,8 @@ from service.utils import (
     langchain_to_chat_message,
     remove_tool_calls,
 )
-from vector_databases import get_vec_client_timescale
+# from vector_databases import get_vec_client_timescale
+# from vector_databases import get_vec_client_pgvector
 
 
 
@@ -165,9 +166,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
                 # Set store for long-term memory (cross-conversation knowledge)
                 agent.store = store
 
-            vec_client = get_vec_client_timescale(get_postgres_connection_string())
-            app.state.vec_client = vec_client
-            print(type(vec_client))
+            # vec_client = get_vec_client_timescale(get_postgres_connection_string())
+            # app.state.vec_client = vec_client
+            # print(type(vec_client))
             yield
                 
     except Exception as e:
@@ -294,8 +295,8 @@ async def _handle_input(user_input: UserInput, agent: AgentGraph, vec_client: cl
 
     configurable = {"thread_id": thread_id, "model": user_input.model, "user_id": user_id}
     
-    if vec_client:
-        configurable["vec_client"] = vec_client
+    # if vec_client:
+    #     configurable["vec_client"] = vec_client
                         
     callbacks = []
     if settings.LANGFUSE_TRACING:
@@ -359,10 +360,11 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
     # in that case.
     agent: AgentGraph = get_agent(agent_id)
 
-    if agent_id == "self_corrective_rag" or "prototype_rag_tool":
-        kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
-    else:
-        kwargs, run_id    = await _handle_input(user_input, agent, None)
+    # if agent_id == "self_corrective_rag" or "prototype_rag_tool":
+    #     kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
+    # else:
+    #     kwargs, run_id    = await _handle_input(user_input, agent, None)
+    kwargs, run_id    = await _handle_input(user_input, agent, None)
 
     try:
         response_events: list[tuple[str, Any]] = await agent.ainvoke(**kwargs, stream_mode=["updates", "values"])  # type: ignore # fmt: skip
@@ -406,10 +408,11 @@ async def message_generator(
     """
     agent: AgentGraph = get_agent(agent_id)
     
-    if agent_id == "self_corrective_rag" or "prototype_rag_tool":
-        kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
-    else:
-        kwargs, run_id    = await _handle_input(user_input, agent, None)
+    # if agent_id == "self_corrective_rag" or "prototype_rag_tool":
+    #     kwargs, run_id    = await _handle_input(user_input, agent, app.state.vec_client)
+    # else:
+    #     kwargs, run_id    = await _handle_input(user_input, agent, None)
+    kwargs, run_id    = await _handle_input(user_input, agent, None)
 
 
     # Build a stable key for this conversation thread

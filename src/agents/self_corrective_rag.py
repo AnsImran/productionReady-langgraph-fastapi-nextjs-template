@@ -13,7 +13,7 @@ from langgraph.types import Command
 from langgraph.types import StreamWriter
 
 # --- Your project imports ---
-from vector_databases import get_docs_pinecone, get_docs_timescale
+from vector_databases import get_docs_pinecone, get_docs_timescale, get_docs_pgvector
 from core import settings  # expects: settings.VEC_CLIENT, settings.PINECONE_VEC_CLIENT, settings.POSTGRES_TIMESCALE_VEC_CLIENT, settings.DEFAULT_EMBEDDING_MODEL
 import openai
 openai.api_type=openai
@@ -41,10 +41,10 @@ from langchain_core.runnables import RunnableConfig
 from timescale_vector import client
 
 
-from vector_databases import (
-                                get_docs_timescale,
-                                get_docs_pinecone
-)
+# from vector_databases import (
+#                                 get_docs_timescale,
+#                                 get_docs_pinecone
+# )
 from core import get_model, settings
 
 
@@ -537,6 +537,63 @@ async def tool_get_docs_timescale(
 
 
 
+
+
+@tool("get_docs_pgvector")
+async def tool_get_docs_pgvector(
+    query:             Optional[str]  = None,
+    top_k:             int            = 5,
+    max_chars_per_doc: Optional[int]  = None,
+    include_metadata:  bool           = True,
+    config:            RunnableConfig = None,
+    tool_call_id: Annotated[str, InjectedToolCallId] = "",
+) -> Command:
+    """
+    Retrieve top-k docs from PGVector and store them in state.documents.
+    Also appends a ToolMessage tied to the triggering tool_call_id with the docs text.
+    """
+    # pull a pre-initialized vec_client from the runnable config (if your graph set it)
+    print('1')
+    vec_client = (config or {}).get("configurable", {}).get("vec_client")
+
+    print('2')
+    try:
+        docs = await get_docs_pgvector(
+            question            = query or "",
+            vec_client          = None, #vec_client,
+            embedding_model_name= settings.DEFAULT_EMBEDDING_MODEL,
+            max_results         = top_k,
+        )
+    except Exception as e:
+        print(f"Error between 2 and 3: {e}")
+        raise  # re-raise if you still want the exception to propagate
+
+    print('3')
+    normalized = _normalize_docs(docs)
+
+    print('4')
+    tool_msg = ToolMessage(
+        content=_format_docs_for_tool_message(
+            normalized,
+            max_chars_per_doc=max_chars_per_doc,   # None => full text
+            include_metadata=include_metadata,     # include metadata header
+        ),
+        tool_call_id=tool_call_id,
+        name="get_docs_pgvector",
+    )
+
+    print('5')
+    return Command(update={
+        "messages":         [tool_msg],
+        "documents":        normalized,
+        "retrieval_source": "pgvector",
+        "question":         query,
+    })
+
+
+
+
+
 # --------------------------- Router: force a single tool call ---------------
 async def route_vec_client(state: AgentState, config: RunnableConfig) -> AgentState:
     """
@@ -552,6 +609,9 @@ async def route_vec_client(state: AgentState, config: RunnableConfig) -> AgentSt
         tool_name = "get_docs_pinecone"
     elif settings.VEC_CLIENT == settings.POSTGRES_TIMESCALE_VEC_CLIENT:
         tool_name = "get_docs_timescale"
+    elif settings.VEC_CLIENT == settings.POSTGRES_PGVECTOR_VEC_CLIENT:
+        tool_name = "get_docs_pgvector"
+    
     else:
         # Return empty docs if misconfigured
         return {"documents": [], "retrieval_source": "invalid", "question": state["question"]}
@@ -670,7 +730,7 @@ async def finalize_response(state: AgentState, config: RunnableConfig) -> AgentS
 ## Build Graph
 graph = StateGraph(AgentState, config_schema=GraphConfig)
 
-tools     = [tool_get_docs_pinecone, tool_get_docs_timescale]
+tools     = [tool_get_docs_pinecone, tool_get_docs_timescale, tool_get_docs_pgvector]
 tool_node = ToolNode(tools)
 
 

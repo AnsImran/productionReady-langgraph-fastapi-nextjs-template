@@ -69,7 +69,8 @@ from schema.models import (
 from schema.vec_clients import (
     AllVecClientEnum,
     Postgres_Timescale_Vec_Client_Name,
-    Pinecone_Vec_Client_Name
+    Pinecone_Vec_Client_Name,
+    Postgres_PgVector_Vec_Client_Name,
 )
 
 
@@ -191,6 +192,7 @@ class Settings(BaseSettings):
     VEC_CLIENT:                    AllVecClientEnum | None = None  # type: ignore[assignment]
     POSTGRES_TIMESCALE_VEC_CLIENT: AllVecClientEnum | None = None #Postgres_Timescale_Vec_Client_Name.POSTGRES_TIMESCALE_VEC_CLIENT
     PINECONE_VEC_CLIENT:           AllVecClientEnum | None = None #Pinecone_Vec_Client_Name.PINECONE_VEC_CLIENT
+    POSTGRES_PGVECTOR_VEC_CLIENT: AllVecClientEnum | None = None #Postgres_PgVector_Vec_Client_Name.POSTGRES_PGVECTOR_VEC_CLIENT
     
     
     
@@ -199,6 +201,7 @@ class Settings(BaseSettings):
     def model_post_init(self, __context: Any) -> None:
         self.POSTGRES_TIMESCALE_VEC_CLIENT = Postgres_Timescale_Vec_Client_Name.POSTGRES_TIMESCALE_VEC_CLIENT
         self.PINECONE_VEC_CLIENT           = Pinecone_Vec_Client_Name.PINECONE_VEC_CLIENT
+        self.POSTGRES_PGVECTOR_VEC_CLIENT = Postgres_PgVector_Vec_Client_Name.POSTGRES_PGVECTOR_VEC_CLIENT
         
 
         

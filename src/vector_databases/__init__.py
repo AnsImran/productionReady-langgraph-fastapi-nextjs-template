@@ -11,6 +11,8 @@ from vector_databases.local_pinecone import (
 from vector_databases.postgres.timescale_postgres.get_docs_timescale import get_docs_timescale
 from vector_databases.postgres.timescale_postgres.get_vec_client_timescale import get_vec_client_timescale
 
+from vector_databases.postgres.pg_vector_postgres.get_docs_pgvector import get_docs_pgvector 
+
 __all__ = ["get_vec_client_timescale",
             "get_docs_timescale",
             "add_documents_to_vectorstore_pinecone",
@@ -20,6 +22,7 @@ __all__ = ["get_vec_client_timescale",
             "query_pinecone",
             "query_and_rerank_pinecone",
             "result_reranker_pinecone",
+            "get_docs_pgvector",
           ]
 
 
