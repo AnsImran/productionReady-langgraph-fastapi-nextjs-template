@@ -1,21 +1,5 @@
 # ./compose.yml
 services:
-  postgres:
-    image: timescale/timescaledb-ha:pg16
-    ports:
-      - "5432:5432"
-    environment:
-      - POSTGRES_USER=${POSTGRES_USER:-postgres}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
-      - POSTGRES_DB=${POSTGRES_DB:-agent_service}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres}"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-
   agent_service:
     build:
       context: .
@@ -24,9 +8,6 @@ services:
       - "8080:8080"
     env_file:
       - .env               # <-- switch between .env.local and .env.prod by changing this line or using --env-file
-    depends_on:
-      postgres:
-        condition: service_healthy
     healthcheck:
       # (now works because we install curl in the Dockerfile below)
       test: ["CMD", "curl", "-fsS", "http://localhost:8080/info"]
@@ -39,6 +20,3 @@ services:
     # IMPORTANT for Windows + local Langfuse. Safe to leave in for prod too.
     extra_hosts:
       - "host.docker.internal:host-gateway"
-
-volumes:
-  postgres_data:
