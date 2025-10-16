@@ -1,6 +1,5 @@
 from typing import Optional
 
-from dotenv import load_dotenv
 from langchain_openai import OpenAIEmbeddings
 from langchain_community.vectorstores import PGVector
 
@@ -9,11 +8,11 @@ from schema.models import (
     OpenAIEmbeddingModelName,
 )
 
-load_dotenv()
+from memory import get_postgres_connection_string
 
 
 def get_vec_client_pgvector(
-    PGVECTOR_CONNECTION: str,
+    connection_string: str | None = None,
     collection_name: str = "services",
     embedding_model_name: AllEmbeddingModelEnum = OpenAIEmbeddingModelName.TEXT_EMBEDDING_3_SMALL,
     *,
@@ -26,7 +25,7 @@ def get_vec_client_pgvector(
     Initializes and returns a LangChain PGVector vector store client.
 
     Args:
-        PGVECTOR_CONNECTION:  str  =  ''   # e.g. 'postgresql+psycopg2://user:pass@host:5432/db'
+        connection_string:    str  =  ''   # e.g. 'postgresql+psycopg2://user:pass@host:5432/db'
         collection_name:      str  =  'services'
         embedding_model_name: AllEmbeddingModelEnum = 'text-embedding-3-small'
         create_if_missing:    bool =  False
@@ -56,12 +55,14 @@ def get_vec_client_pgvector(
 
     embeddings = OpenAIEmbeddings(model=model_id)
 
+    conn_string = connection_string or get_postgres_connection_string()
+
     if create_if_missing:
         if not texts:
             raise ValueError("`texts` must be provided when create_if_missing=True.")
         # Create the collection (or upsert into it) by inserting texts
         return PGVector.from_texts(
-            connection_string=PGVECTOR_CONNECTION,
+            connection_string=conn_string,
             embedding=embeddings,
             texts=texts,
             metadatas=metadatas,
@@ -73,6 +74,6 @@ def get_vec_client_pgvector(
     return PGVector.from_existing_index(
         embedding=embeddings,
         collection_name=collection_name,
-        connection_string=PGVECTOR_CONNECTION,
+        connection_string=conn_string,
         use_jsonb=use_jsonb,
     )

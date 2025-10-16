@@ -1,5 +1,4 @@
 import os
-from dotenv import load_dotenv
 from langchain_community.vectorstores import PGVector
 from langchain_openai import OpenAIEmbeddings
 from langchain_core.documents import Document
@@ -8,7 +7,7 @@ from schema.models import (
     OpenAIEmbeddingModelName,
 )
 
-load_dotenv()
+from memory import get_postgres_connection_string
 
 
 async def get_docs_pgvector(
@@ -32,13 +31,13 @@ async def get_docs_pgvector(
 
     if vec_client is None:
         # Auto-connect if client not provided
-        PGVECTOR_CONNECTION = os.getenv("PGVECTOR_CONNECTION")
         COLLECTION = os.getenv("PGVECTOR_COLLECTION", "services")
+        connection_string = get_postgres_connection_string()
 
         embeddings = OpenAIEmbeddings(model=embedding_model_name)
         vec_client = PGVector.from_existing_index(
             embedding=embeddings,
-            connection_string=PGVECTOR_CONNECTION,
+            connection_string=connection_string,
             collection_name=COLLECTION,
             use_jsonb=True,
         )
