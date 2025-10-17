@@ -1,10 +1,11 @@
+import asyncio
 import inspect
 import json
 import logging
 import warnings
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 from uuid import UUID, uuid4
 import hashlib, time
 
@@ -20,6 +21,7 @@ from langfuse import Langfuse  # type: ignore[import-untyped]
 from langfuse.langchain import CallbackHandler  # type: ignore[import-untyped]
 from langgraph.types import Command, Interrupt
 from langsmith import Client as LangsmithClient
+from psycopg import OperationalError
 from timescale_vector import client
 
 
@@ -46,6 +48,7 @@ from timescale_vector import client
 
 from agents import DEFAULT_AGENT, AgentGraph, get_agent, get_all_agent_info
 from core import settings
+from core.settings import DatabaseType
 from memory import initialize_database, initialize_store, get_postgres_connection_string ###########################################################
 from schema import (
     ChatHistory,
@@ -88,6 +91,27 @@ warnings.filterwarnings("ignore", category=LangChainBetaWarning)
 logger = logging.getLogger(__name__)
 
 
+async def _safe_exit_context(ctx: Any) -> None:
+    """Best-effort closure for async context managers."""
+    if ctx is None:
+        return
+    exit_cb = getattr(ctx, "__aexit__", None)
+    if exit_cb is None:
+        return
+    try:
+        await exit_cb(None, None, None)
+    except Exception as exc:  # pragma: no cover - cleanup path
+        logger.warning("Error while closing context: %s", exc)
+
+
+def _assign_memory_components(saver: Any, store: Any) -> None:
+    """Attach shared memory components to every registered agent."""
+    for agent_info in get_all_agent_info():
+        agent = get_agent(agent_info.key)
+        if saver is not None:
+            agent.checkpointer = saver
+        if store is not None:
+            agent.store = store
 
 
 # `verify_bearer` is a **FastAPI dependency** that enforces optional Bearer token authentication:
@@ -144,36 +168,48 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     Configurable lifespan that initializes the appropriate database checkpointer and store
     based on settings.
     """
+    app.state.saver_ctxs = []
+    app.state.store_ctxs = []
+    app.state.refresh_lock = asyncio.Lock()
     try:
-        # Initialize both checkpointer (for short-term memory) and store (for long-term memory)
-        async with initialize_database() as saver, initialize_store() as store:
-            # Set up both components
-            if hasattr(saver, "setup"):  # ignore: union-attr
-                await saver.setup()
-            # Only setup store for Postgres as InMemoryStore doesn't need setup
-            if hasattr(store, "setup"):  # ignore: union-attr
-                await store.setup()
+        saver_ctx = initialize_database()
+        store_ctx = initialize_store()
+        try:
+            saver = await saver_ctx.__aenter__()
+            store = await store_ctx.__aenter__()
+        except Exception:
+            await _safe_exit_context(saver_ctx)
+            await _safe_exit_context(store_ctx)
+            raise
 
-            print("Checkpointer:", type(saver).__name__)
-            print("Store:", type(store).__name__)
+        app.state.saver_ctxs.append(saver_ctx)
+        app.state.store_ctxs.append(store_ctx)
+        app.state.saver = saver
+        app.state.store = store
 
-            # Configure agents with both memory components | ALL AGENTS! |
-            agents = get_all_agent_info()
-            for a in agents:
-                agent = get_agent(a.key)
-                # Set checkpointer for thread-scoped memory (conversation history)
-                agent.checkpointer = saver
-                # Set store for long-term memory (cross-conversation knowledge)
-                agent.store = store
+        # Set up both components
+        if hasattr(saver, "setup"):  # ignore: union-attr
+            await saver.setup()
+        if hasattr(store, "setup"):  # ignore: union-attr
+            await store.setup()
 
-            # vec_client = get_vec_client_timescale(get_postgres_connection_string())
-            # app.state.vec_client = vec_client
-            # print(type(vec_client))
-            yield
-                
+        print("Checkpointer:", type(saver).__name__)
+        print("Store:", type(store).__name__)
+
+        _assign_memory_components(saver, store)
+
+        # vec_client = get_vec_client_timescale(get_postgres_connection_string())
+        # app.state.vec_client = vec_client
+        # print(type(vec_client))
+        yield
     except Exception as e:
         logger.error(f"Error during database/store initialization: {e}")
         raise
+    finally:
+        for ctx in reversed(getattr(app.state, "store_ctxs", [])):
+            await _safe_exit_context(ctx)
+        for ctx in reversed(getattr(app.state, "saver_ctxs", [])):
+            await _safe_exit_context(ctx)
 
 
 app    = FastAPI(lifespan=lifespan)
@@ -284,6 +320,101 @@ async def info() -> ServiceMetadata:
 # * Skips echoed human input and tool-use chunks.
 # * Ends with `data: [DONE]`.
 
+async def _refresh_memory_components() -> None:
+    """Reinitialize LangGraph memory connections after a database failure."""
+    if settings.DATABASE_TYPE != DatabaseType.POSTGRES:
+        return
+
+    lock: asyncio.Lock = getattr(app.state, "refresh_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        app.state.refresh_lock = lock
+
+    async with lock:
+        if not hasattr(app.state, "saver_ctxs"):
+            app.state.saver_ctxs = []
+        if not hasattr(app.state, "store_ctxs"):
+            app.state.store_ctxs = []
+
+        saver_ctx = initialize_database()
+        store_ctx = initialize_store()
+        try:
+            saver = await saver_ctx.__aenter__()
+            store = await store_ctx.__aenter__()
+        except Exception as exc:
+            await _safe_exit_context(saver_ctx)
+            await _safe_exit_context(store_ctx)
+            logger.error("Failed to refresh LangGraph memory components: %s", exc)
+            raise
+
+        app.state.saver_ctxs.append(saver_ctx)
+        app.state.store_ctxs.append(store_ctx)
+        app.state.saver = saver
+        app.state.store = store
+
+        if hasattr(saver, "setup"):  # ignore: union-attr
+            await saver.setup()
+        if hasattr(store, "setup"):  # ignore: union-attr
+            await store.setup()
+
+        logger.warning("Reinitialized LangGraph Postgres connections after failure.")
+        _assign_memory_components(saver, store)
+
+
+async def _aget_state_with_retry(agent: AgentGraph, config: RunnableConfig):
+    """Fetch agent state, retrying once if the Postgres connection was dropped."""
+    try:
+        return await agent.aget_state(config=config)
+    except OperationalError as exc:
+        if settings.DATABASE_TYPE != DatabaseType.POSTGRES:
+            raise
+        logger.warning("Checkpointer connection closed; refreshing before retry. %s", exc)
+        await _refresh_memory_components()
+        return await agent.aget_state(config=config)
+
+
+async def _invoke_agent_with_retry(
+    agent: AgentGraph,
+    *,
+    kwargs: dict[str, Any],
+    stream_mode: Optional[list[str]] = None,
+) -> list[tuple[str, Any]]:
+    """Call agent.ainvoke with a single automatic retry on connection loss."""
+    attempt = 0
+    while True:
+        try:
+            if stream_mode is None:
+                return await agent.ainvoke(**kwargs)
+            return await agent.ainvoke(**kwargs, stream_mode=stream_mode)
+        except OperationalError as exc:
+            attempt += 1
+            if settings.DATABASE_TYPE != DatabaseType.POSTGRES or attempt > 1:
+                raise
+            logger.warning("Agent invoke failed due to closed connection; retrying. %s", exc)
+            await _refresh_memory_components()
+
+
+async def _stream_agent_with_retry(
+    agent: AgentGraph,
+    *,
+    kwargs: dict[str, Any],
+    stream_mode: list[str],
+) -> AsyncGenerator[tuple[str, Any], None]:
+    """Yield agent stream events with a single retry if the connection drops."""
+    attempt = 0
+    while attempt < 2:
+        try:
+            async for event in agent.astream(**kwargs, stream_mode=stream_mode):
+                yield event
+            return
+        except OperationalError as exc:
+            attempt += 1
+            if settings.DATABASE_TYPE != DatabaseType.POSTGRES or attempt >= 2:
+                raise
+            logger.warning("Agent stream failed due to closed connection; retrying. %s", exc)
+            await _refresh_memory_components()
+
+
 async def _handle_input(user_input: UserInput, agent: AgentGraph, vec_client: client.Async|None = None) -> tuple[dict[str, Any], UUID]:
     """
     Parse user input and handle any required interrupt resumption.
@@ -321,7 +452,7 @@ async def _handle_input(user_input: UserInput, agent: AgentGraph, vec_client: cl
     )
 
     # Check for interrupts that need to be resumed
-    state = await agent.aget_state(config=config)
+    state = await _aget_state_with_retry(agent, config)
     interrupted_tasks = [
         task for task in state.tasks if hasattr(task, "interrupts") and task.interrupts
     ]
@@ -367,7 +498,11 @@ async def invoke(user_input: UserInput, agent_id: str = DEFAULT_AGENT) -> ChatMe
     kwargs, run_id    = await _handle_input(user_input, agent, None)
 
     try:
-        response_events: list[tuple[str, Any]] = await agent.ainvoke(**kwargs, stream_mode=["updates", "values"])  # type: ignore # fmt: skip
+        response_events: list[tuple[str, Any]] = await _invoke_agent_with_retry(
+            agent,
+            kwargs=kwargs,
+            stream_mode=["updates", "values"],
+        )  # type: ignore # fmt: skip
         response_type, response = response_events[-1]
         if response_type == "values":
             # Normal response, the agent completed successfully
@@ -446,7 +581,11 @@ async def message_generator(
 
 
     try:
-        async for stream_event in agent.astream(**kwargs, stream_mode=["updates","custom","messages"]):
+        async for stream_event in _stream_agent_with_retry(
+            agent,
+            kwargs=kwargs,
+            stream_mode=["updates", "custom", "messages"],
+        ):
             if not isinstance(stream_event, tuple):
                 continue
 
