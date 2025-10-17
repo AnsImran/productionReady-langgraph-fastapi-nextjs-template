@@ -172,6 +172,8 @@ class Settings(BaseSettings):
     POSTGRES_HOST:     str       | None = None
     POSTGRES_PORT:     int       | None = None
     POSTGRES_DB:       str       | None = None
+    POSTGRES_POOL_MIN_SIZE: int        = 1
+    POSTGRES_POOL_MAX_SIZE: int | None = 5
 
     # MongoDB Configuration (effective when DATABASE_TYPE=MONGO)
     MONGO_HOST:        str       | None = None

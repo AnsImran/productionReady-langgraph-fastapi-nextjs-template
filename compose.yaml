@@ -10,7 +10,7 @@ services:
       - .env               # <-- switch between .env.local and .env.prod by changing this line or using --env-file
     healthcheck:
       # (now works because we install curl in the Dockerfile below)
-      test: ["CMD", "curl", "-fsS", "http://localhost:8080/info"]
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/health"]
       interval: 5s
       timeout: 5s
       retries: 5

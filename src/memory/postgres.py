@@ -1,8 +1,12 @@
 import logging
-from contextlib import AbstractAsyncContextManager
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Any, AsyncIterator
 
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.store.postgres import AsyncPostgresStore
+from langgraph.store.postgres.base import PoolConfig
+from psycopg.rows import dict_row
+from psycopg_pool import AsyncConnectionPool
 
 from core.settings import settings
 
@@ -42,10 +46,50 @@ def get_postgres_connection_string() -> str:
     )
 
 
-def get_postgres_saver() -> AbstractAsyncContextManager[AsyncPostgresSaver]:
+def _resolve_pool_sizes() -> tuple[int, int | None]:
+    """Compute safe pool bounds based on configuration."""
+    min_size = settings.POSTGRES_POOL_MIN_SIZE or 1
+    if min_size < 1:
+        logger.warning(
+            "POSTGRES_POOL_MIN_SIZE=%s is invalid; using 1 instead.", min_size
+        )
+        min_size = 1
+
+    max_size = settings.POSTGRES_POOL_MAX_SIZE
+    if max_size is not None and max_size < min_size:
+        logger.warning(
+            "POSTGRES_POOL_MAX_SIZE (%s) is smaller than POSTGRES_POOL_MIN_SIZE (%s); "
+            "clamping to min_size.",
+            max_size,
+            min_size,
+        )
+        max_size = min_size
+
+    return min_size, max_size
+
+
+def _pool_kwargs() -> dict[str, Any]:
+    return {
+        "autocommit": True,
+        "prepare_threshold": 0,
+        "row_factory": dict_row,
+    }
+
+
+@asynccontextmanager
+async def get_postgres_saver() -> AsyncIterator[AsyncPostgresSaver]:
     """Initialize and return a PostgreSQL saver instance."""
     validate_postgres_config()
-    return AsyncPostgresSaver.from_conn_string(get_postgres_connection_string())
+    connection_string = get_postgres_connection_string()
+    min_size, max_size = _resolve_pool_sizes()
+
+    async with AsyncConnectionPool(
+        connection_string,
+        min_size=min_size,
+        max_size=max_size,
+        kwargs=_pool_kwargs(),
+    ) as pool:
+        yield AsyncPostgresSaver(conn=pool)
 
 
 def get_postgres_store():
@@ -61,4 +105,13 @@ def get_postgres_store():
     """
     validate_postgres_config()
     connection_string = get_postgres_connection_string()
-    return AsyncPostgresStore.from_conn_string(connection_string)
+    min_size, max_size = _resolve_pool_sizes()
+    pool_config: PoolConfig = {
+        "min_size": min_size,
+        "kwargs": _pool_kwargs(),
+    }
+    if max_size is not None:
+        pool_config["max_size"] = max_size
+    return AsyncPostgresStore.from_conn_string(
+        connection_string, pool_config=pool_config
+    )
