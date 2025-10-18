@@ -24,7 +24,7 @@ import { MessageEditor } from "./message-editor";
 import { MessageReasoning } from "./message-reasoning";
 import { PreviewAttachment } from "./preview-attachment";
 import { Weather } from "./weather";
-import { TimescaleTool } from "./timescale-tool";
+import { TimescaleTool, type TimescaleToolPart } from "./timescale-tool";
 
 const PurePreviewMessage = ({
   chatId,
@@ -268,16 +268,32 @@ const PurePreviewMessage = ({
               );
             }
 
+            const typeName = type as string;
+
             if (
               (type === "dynamic-tool" &&
                 "toolName" in part &&
                 part.toolName === "get_docs_pgvector") ||
-              type === "tool-get_docs_pgvector"
+              typeName === "tool-get_docs_pgvector"
             ) {
+              const toolCallId =
+                type === "dynamic-tool" && "toolCallId" in part
+                  ? (part as { toolCallId?: string }).toolCallId
+                  : undefined;
+
+              const normalizedPart: TimescaleToolPart = {
+                ...(part as TimescaleToolPart),
+                toolCallId: toolCallId ?? key,
+                toolName:
+                  "toolName" in part && typeof part.toolName === "string"
+                    ? part.toolName
+                    : "get_docs_pgvector",
+              };
+
               return (
                 <TimescaleTool
-                  key={part.toolCallId ?? key}
-                  part={part}
+                  key={normalizedPart.toolCallId ?? key}
+                  part={normalizedPart}
                 />
               );
             }

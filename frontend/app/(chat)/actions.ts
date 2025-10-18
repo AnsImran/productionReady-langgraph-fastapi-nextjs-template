@@ -1,6 +1,5 @@
 "use server";
 
-import type { UIMessage } from "ai";
 import { cookies } from "next/headers";
 import type { VisibilityType } from "@/components/visibility-selector";
 import {
@@ -12,6 +11,7 @@ import {
   updateChatVisiblityById,
 } from "@/lib/db/queries";
 import { getTextFromMessage } from "@/lib/utils";
+import type { ChatMessage } from "@/lib/types";
 
 export async function saveChatModelAsCookie(model: string) {
   const cookieStore = await cookies();
@@ -21,7 +21,7 @@ export async function saveChatModelAsCookie(model: string) {
 export async function generateTitleFromUserMessage({
   message,
 }: {
-  message: UIMessage;
+  message: ChatMessage;
 }) {
   const content = getTextFromMessage(message).trim();
   if (!content) {
@@ -38,7 +38,7 @@ export async function ensureChatTitle({
   visibility,
 }: {
   chatId: string;
-  message: UIMessage;
+  message: ChatMessage;
   userId: string;
   visibility: VisibilityType;
 }) {
@@ -70,7 +70,7 @@ export async function ensureChatTitle({
   return finalTitle;
 }
 
-function buildFallbackTitle(message: UIMessage) {
+function buildFallbackTitle(message: ChatMessage) {
   const text = getTextFromMessage(message).trim();
 
   if (!text) {

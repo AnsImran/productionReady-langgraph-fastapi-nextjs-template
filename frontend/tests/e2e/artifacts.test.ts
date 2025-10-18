@@ -18,7 +18,7 @@ test.describe("Artifacts activity", () => {
     await chatPage.createNewChat();
 
     await chatPage.sendUserMessage(
-      "Help me write an essay about Silicon Valley"
+      "Do you guys help with SPI and API Registration?"
     );
     await artifactPage.isGenerationComplete();
 
@@ -37,7 +37,7 @@ test.describe("Artifacts activity", () => {
     await chatPage.createNewChat();
 
     await chatPage.sendUserMessage(
-      "Help me write an essay about Silicon Valley"
+      "Do you guys help with SPI and API Registration?"
     );
     await artifactPage.isGenerationComplete();
 
@@ -57,7 +57,7 @@ test.describe("Artifacts activity", () => {
     await chatPage.createNewChat();
 
     await chatPage.sendUserMessage(
-      "Help me write an essay about Silicon Valley"
+      "Do you guys help with SPI and API Registration?"
     );
     await artifactPage.isGenerationComplete();
 

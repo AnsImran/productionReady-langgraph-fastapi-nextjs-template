@@ -133,7 +133,7 @@ test.describe
             parts: [
               {
                 type: "text",
-                text: "Help me write an essay about Silicon Valley",
+                text: "Do you guys help with SPI and API Registration?",
               },
             ],
             createdAt: new Date().toISOString(),
@@ -187,7 +187,7 @@ test.describe
             parts: [
               {
                 type: "text",
-                text: "Help me write an essay about Silicon Valley",
+                text: "Do you guys help with SPI and API Registration?",
               },
             ],
             createdAt: new Date().toISOString(),
@@ -237,7 +237,7 @@ test.describe
             parts: [
               {
                 type: "text",
-                text: "Help me write an essay about Silicon Valley",
+                text: "Do you guys help with SPI and API Registration?",
               },
             ],
             createdAt: new Date().toISOString(),
@@ -280,7 +280,7 @@ test.describe
             parts: [
               {
                 type: "text",
-                text: "Help me write an essay about Silicon Valley",
+                text: "Do you guys help with SPI and API Registration?",
               },
             ],
             createdAt: new Date().toISOString(),
@@ -323,11 +323,11 @@ test.describe
           message: {
             id: generateUUID(),
             role: "user",
-            content: "Help me write an essay about Silicon Valley",
+            content: "Do you guys help with SPI and API Registration?",
             parts: [
               {
                 type: "text",
-                text: "Help me write an essay about Silicon Valley",
+                text: "Do you guys help with SPI and API Registration?",
               },
             ],
             createdAt: new Date().toISOString(),

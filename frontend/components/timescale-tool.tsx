@@ -1,5 +1,6 @@
 "use client";
 
+import type { ToolUIPart } from "ai";
 import type { ReactNode } from "react";
 import { useState } from "react";
 import { Tool, ToolContent, ToolHeader, ToolInput, ToolOutput } from "./elements/tool";
@@ -12,7 +13,7 @@ import {
   CardTitle,
 } from "./ui/card";
 
-type TimescaleToolPart = {
+export type TimescaleToolPart = {
   type: string;
   state?: string;
   toolCallId?: string;
@@ -75,8 +76,9 @@ export function TimescaleTool({ part }: { part: TimescaleToolPart }) {
     );
   }
 
+  const hasInput = part.input !== null && part.input !== undefined;
   const shouldShowInput =
-    part.input &&
+    hasInput &&
     (headerState === "input-available" ||
       headerState === "output-streaming" ||
       headerState === "output-available");
@@ -87,7 +89,9 @@ export function TimescaleTool({ part }: { part: TimescaleToolPart }) {
     <Tool defaultOpen={false} key={part.toolCallId ?? headerType}>
       <ToolHeader state={headerState as any} type={headerType as any} />
       <ToolContent>
-        {shouldShowInput && <ToolInput input={part.input} />}
+        {shouldShowInput && (
+          <ToolInput input={part.input as ToolUIPart["input"]} />
+        )}
         {shouldShowOutput && (
           <ToolOutput
             className="pt-0"
