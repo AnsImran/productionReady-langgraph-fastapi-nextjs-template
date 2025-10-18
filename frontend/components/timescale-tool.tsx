@@ -50,7 +50,7 @@ export function TimescaleTool({ part }: { part: TimescaleToolPart }) {
   const headerState = normalizeState(part.state);
   const headerType =
     part.type === "dynamic-tool"
-      ? `tool-${part.toolName ?? "get_docs_timescale"}`
+      ? `tool-${part.toolName ?? "get_docs_pgvector"}`
       : part.type;
 
   const { docs, rawFallback } = parseTimescaleOutput(part.output);
