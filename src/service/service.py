@@ -855,15 +855,16 @@ async def feedback(feedback: Feedback) -> FeedbackResponse:
 # https://chatgpt.com/c/6891f4fd-6f08-8324-bebf-b4ea5243ebe3
 # message:2 branch:11
 @router.post("/history")
-def history(input: ChatHistoryInput) -> ChatHistory:
+async def history(input: ChatHistoryInput) -> ChatHistory:
     """
     Get chat history.
     """
     # TODO: Hard-coding DEFAULT_AGENT here is wonky
     agent: AgentGraph = get_agent(DEFAULT_AGENT)
     try:
-        state_snapshot = agent.get_state(
-            config=RunnableConfig(configurable={"thread_id": input.thread_id})
+        state_snapshot = await _aget_state_with_retry(
+            agent,
+            RunnableConfig(configurable={"thread_id": input.thread_id}),
         )
         messages:      list[AnyMessage]  = state_snapshot.values["messages"]
         chat_messages: list[ChatMessage] = [langchain_to_chat_message(m) for m in messages]
