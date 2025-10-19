@@ -23,7 +23,7 @@
 - Stack: Next.js 15, React 19 RC, Tailwind 4, SWR, Drizzle ORM, Vercel AI SDK (ui/core), Python 3.13+, FastAPI, LangGraph,  Docker.
 
 ## What I Added
-- FastAPI microservice foundation is a modified version of Joshua Carroll's [agent-service-toolkit](https://github.com/JoshuaC215/agent-service-toolkit); the Next.js UI is a modified version of Vercel's [AI Chatbot template](https://github.com/vercel-labs/ai-chatbot), so we start with two proven projects.
+- FastAPI microservice foundation is a modified version of Joshua Carroll's [agent-service-toolkit](https://github.com/JoshuaC215/agent-service-toolkit); the Next.js UI is a modified version of Vercel's [AI Chatbot template](https://github.com/vercel-labs/ai-chatbot), so we start with two highly scalable projects.
 - Reworked the FastAPI service to speak the [AI SDK UI stream protocol](https://ai-sdk.dev/docs/ai-sdk-ui/stream-protocol) for text, tool calls, and RAG artifacts.
 - Replaced the Vercel's Ai Chatbot's server-side OpenAI calls with a server-side proxy so every browser request hops through Next.js to FastAPI, keeping headers, SSE, and auth intact.
 - Wired the UI into FastAPI's history endpoint so existing chats hydrate correctly.
