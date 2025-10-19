@@ -1,13 +1,13 @@
 ## Live Demo
 - ### [Launch the app](https://frontend-d9fe.vercel.app)
 
-<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_1.JPG" alt="Chat snapshot 1" width="600"></a>
+<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_1.JPG" alt="Chat snapshot 1" width="1000"></a>
 
-<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_2.JPG" alt="Chat snapshot 2" width="600"></a>
+<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_2.JPG" alt="Chat snapshot 2" width="1000"></a>
 
-<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_3.JPG" alt="Chat snapshot 3" width="600"></a>
+<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_3.JPG" alt="Chat snapshot 3" width="1000"></a>
 
-<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_4.JPG" alt="Chat snapshot 4" width="600"></a>
+<a href="https://frontend-d9fe.vercel.app" target="_blank"><img src="media/chatbot_4.JPG" alt="Chat snapshot 4" width="1000"></a>
 
 ## Problem This Template Solves
 - Teams need one template that marries a scalable Python FastAPI microservice (built for LangGraph and LangChain agents) with a production-grade Next.js frontend.
