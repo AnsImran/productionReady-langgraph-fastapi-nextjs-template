@@ -1,19 +1,18 @@
 [project]
 name = "agent-service-toolkit"
 version = "0.1.0"
-description = "Full toolkit for running an AI agent service built with LangGraph, FastAPI and Streamlit"
+description = "Full toolkit for running an AI agent service with a LangGraph/FastAPI backend and Next.js frontend on Python 3.13+"
 readme = "README.md"
-authors = [{ name = "Joshua Carroll", email = "carroll.joshk@gmail.com" }]
+authors = [{ name = "Ans Imran", email = "ansimran@protonmail.com" }]
 classifiers = [
     "Development Status :: 4 - Beta",
     "License :: OSI Approved :: MIT License",
     "Framework :: FastAPI",
-    "Programming Language :: Python :: 3.11",
-    "Programming Language :: Python :: 3.12",
+    "Framework :: Next.js",
     "Programming Language :: Python :: 3.13",
 ]
 
-requires-python = ">=3.13,<3.14"#">=3.13,<4.0" #">=3.11" 
+requires-python = ">=3.13,<3.14"
 
 
 dependencies = [
@@ -53,7 +52,6 @@ dependencies = [
     "pyowm ~=3.3.0",
     "python-dotenv ~=1.0.1",
     "setuptools ~=75.6.0",
-    "streamlit ~=1.40.1",
     "tiktoken >=0.8.0",
     "uvicorn ~=0.32.1",
     "jupyter (>=1.1.1,<2.0.0)",
@@ -80,14 +78,13 @@ dev = [
     "mypy",
 ]
 
-# Group for the minimal dependencies to run just the client and Streamlit app.
+# Group for the minimal dependencies to run just the client.
 # These are also installed in the default dependencies.
 # To install run: `uv sync --frozen --only-group client`
 client = [
     "httpx~=0.27.2",
     "pydantic ~=2.10.1",
     "python-dotenv ~=1.0.1",
-    "streamlit~=1.40.1",
 ]
 
 
@@ -97,7 +94,7 @@ package-mode = false
 
 [tool.ruff]
 line-length = 100
-target-version = "py311"
+target-version = "py313"
 
 [tool.ruff.lint]
 extend-select = ["I", "U"]
